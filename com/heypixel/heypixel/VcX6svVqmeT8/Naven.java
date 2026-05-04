@@ -63,6 +63,7 @@ public class Naven {
       this.fileManager = new FileManager();
       this.notificationManager = new NotificationManager();
       this.fileManager.load();
+      this.eventManager.register(this.fileManager);
       this.moduleManager.getModule(ClickGUIModule.class).setEnabled(false);
       this.eventManager.register(getInstance());
       this.eventManager.register(this.eventWrapper);
