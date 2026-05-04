@@ -8,10 +8,8 @@ import com.heypixel.heypixel.VcX6svVqmeT8.events.impl.EventShutdown;
 import com.heypixel.heypixel.VcX6svVqmeT8.modules.impl.render.Glow;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.AnimationUtils;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.IMixinMinecraft;
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
-import javax.swing.JOptionPane;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.main.GameConfig;
 import net.minecraft.world.entity.Entity;
@@ -61,13 +59,10 @@ public class MixinMinecraft implements IMixinMinecraft {
 
       ModList.get().getModFiles().removeAll(fileInfoToRemove);
 
-      try {
-         File file = new File("D:\\sb.dll");
-         System.load(file.getAbsolutePath());
-      } catch (Exception var8) {
-         JOptionPane.showInputDialog(null, var8.getMessage());
-         var8.printStackTrace();
-      }
+      // The original decompiled client attempted to load a hard-coded native DLL
+      // from D:\sb.dll during Minecraft initialization. That path is Windows-only,
+      // crashes on Android/Linux launchers, and is not required for safe analysis.
+      // Native anti-cheat / hardware-hook functionality is intentionally disabled.
    }
 
    @Inject(
