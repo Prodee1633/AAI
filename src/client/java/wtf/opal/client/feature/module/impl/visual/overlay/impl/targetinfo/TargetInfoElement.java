@@ -80,6 +80,10 @@ public final class TargetInfoElement implements IOverlayElement {
 
     @Override
     public void render(DrawContext context, float delta, boolean isBloom) {
+        if (!NVGRenderer.isAvailable()) {
+            return;
+        }
+
         final Target target = this.getTarget();
         if (target == null) {
             return;
@@ -368,10 +372,10 @@ public final class TargetInfoElement implements IOverlayElement {
             activeTarget.updateFormattedName();
         }
 
-        if (preCurrentTarget != null && preCurrentTarget.skinTextureHandle != -1 && this.lastTarget == preCurrentTarget && preCurrentTarget != this.currentTarget && preCurrentTarget != activeTarget) {
+        if (NVGRenderer.isAvailable() && preCurrentTarget != null && preCurrentTarget.skinTextureHandle != -1 && this.lastTarget == preCurrentTarget && preCurrentTarget != this.currentTarget && preCurrentTarget != activeTarget) {
             // target switched (no animation)
             nvgDeleteImage(VG, preCurrentTarget.skinTextureHandle);
-        } else if (this.currentTarget == null && this.lastTarget != null && this.lastTarget.skinTextureHandle != -1 && this.targetAnimation.getValue() == 0) {
+        } else if (NVGRenderer.isAvailable() && this.currentTarget == null && this.lastTarget != null && this.lastTarget.skinTextureHandle != -1 && this.targetAnimation.getValue() == 0) {
             // target animated out
             nvgDeleteImage(VG, preLastTarget.skinTextureHandle);
             this.lastTarget = null;
@@ -430,6 +434,10 @@ public final class TargetInfoElement implements IOverlayElement {
         }
 
         private int getSkinTextureHandle(final int skinTextureGlId) {
+            if (!NVGRenderer.isAvailable()) {
+                return -1;
+            }
+
             if (this.skinTextureHandle != -1) {
                 return this.skinTextureHandle;
             }

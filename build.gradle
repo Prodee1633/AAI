@@ -54,12 +54,19 @@ dependencies {
 	modImplementation include ('com.github.JnCrMx:discord-game-sdk4j:v0.5.5')
 
 	modApi include("org.lwjgl:lwjgl-nanovg:3.3.3")
-	modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-linux")
-	modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-linux-arm64")
-	modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-windows")
-	modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-windows-arm64")
-	modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-macos")
-	modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-macos-arm64")
+
+	// Desktop LWJGL NanoVG natives are glibc/macOS/Windows binaries. On Android/FCL,
+	// the Linux natives try to load libm.so.6 and crash. Build the Android-safe jar with:
+	//     ./gradlew build -Popal.android
+	// The runtime code below disables NanoVG on Android and lets Minecraft launch.
+	if (!project.hasProperty("opal.android")) {
+		modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-linux")
+		modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-linux-arm64")
+		modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-windows")
+		modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-windows-arm64")
+		modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-macos")
+		modRuntimeOnly include("org.lwjgl:lwjgl-nanovg:3.3.3:natives-macos-arm64")
+	}
 }
 
 processResources {

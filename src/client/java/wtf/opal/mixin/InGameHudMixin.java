@@ -78,6 +78,11 @@ public abstract class InGameHudMixin {
 
         final float tickDelta = tickCounter.getTickProgress(false);
 
+        if (!NVGRenderer.isAvailable()) {
+            MinecraftRenderer.render();
+            return;
+        }
+
         this.applyPostProcessing(context, tickDelta);
 
         final Window window = mc.getWindow();
@@ -127,6 +132,10 @@ public abstract class InGameHudMixin {
 
     @Unique
     private void applyPostProcessing(final DrawContext context, final float tickDelta) {
+        if (!NVGRenderer.isAvailable()) {
+            return;
+        }
+
         NVGTextRenderer.blockTextRendering = true;
         ShaderFramebuffer.applyBlurToFullScreen();
 

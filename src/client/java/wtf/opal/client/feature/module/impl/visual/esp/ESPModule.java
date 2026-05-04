@@ -69,6 +69,10 @@ public final class ESPModule extends Module {
     }
 
     private void render(final DrawContext drawContext, final float tickDelta) {
+        if (!NVGRenderer.isAvailable()) {
+            return;
+        }
+
         final Frustum frustum = FrustumHelper.get();
 
         if(frustum == null) {

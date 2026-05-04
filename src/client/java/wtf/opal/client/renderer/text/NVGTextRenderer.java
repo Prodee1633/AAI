@@ -27,7 +27,7 @@ public final class NVGTextRenderer {
     public NVGTextRenderer(final String name, final InputStream inputStream) {
         this.name = name;
         this.fontData = IOUtility.ioResourceToByteBuffer(inputStream, 512 * 1024);
-        if (this.fontData != null) {
+        if (this.fontData != null && NVGRenderer.isAvailable()) {
             nvgCreateFontMem(VG, this.name, this.fontData, false);
         }
     }
@@ -160,6 +160,10 @@ public final class NVGTextRenderer {
     }
 
     public void drawGradientString(final String text, final float x, final float y, final float size, final int color1, final int color2, final boolean shadow) {
+        if (!NVGRenderer.isAvailable()) {
+            return;
+        }
+
         if (blockTextRendering) {
             return;
         }
@@ -192,6 +196,10 @@ public final class NVGTextRenderer {
     }
 
     public float drawString(final String text, float x, final float y, final float size, final int color, final boolean shadow, final int alignment) {
+        if (!NVGRenderer.isAvailable()) {
+            return x + fallbackStringWidth(text, size);
+        }
+
         if (blockTextRendering) {
             return x;
         }
@@ -261,6 +269,10 @@ public final class NVGTextRenderer {
     }
 
     private void drawStringSegment(String segment, float x, float y, float size, boolean underline, boolean strikethrough) {
+        if (!NVGRenderer.isAvailable()) {
+            return;
+        }
+
         nvgText(VG, x, y, segment);
 
         final float width = nvgTextBounds(VG, 0, 0, segment, (FloatBuffer) null);
@@ -284,6 +296,10 @@ public final class NVGTextRenderer {
     }
 
     public float getStringWidth(final String text, final float size) {
+        if (!NVGRenderer.isAvailable()) {
+            return fallbackStringWidth(text, size);
+        }
+
         nvgFontFace(VG, name);
         nvgFontSize(VG, size);
 
@@ -311,6 +327,10 @@ public final class NVGTextRenderer {
     }
 
     public float getStringHeight(final String text, final float size) {
+        if (!NVGRenderer.isAvailable()) {
+            return size;
+        }
+
         nvgFontFace(VG, name);
         nvgFontSize(VG, size);
 
@@ -321,6 +341,13 @@ public final class NVGTextRenderer {
 
             return bounds.get(3) - bounds.get(1);
         }
+    }
+
+    private static float fallbackStringWidth(final String text, final float size) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        return text.replaceAll("§.", "").length() * size * 0.5F;
     }
 
     private static final int[] COLOR_CODES = new int[32];

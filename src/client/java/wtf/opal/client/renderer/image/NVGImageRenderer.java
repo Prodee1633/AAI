@@ -16,7 +16,7 @@ public final class NVGImageRenderer {
 
     public NVGImageRenderer(final InputStream inputStream, final int flags) {
         this.imageData = IOUtility.ioResourceToByteBuffer(inputStream, 512 * 1024);
-        this.imageHandle = nvgCreateImageMem(VG, flags, this.imageData);
+        this.imageHandle = NVGRenderer.isAvailable() ? nvgCreateImageMem(VG, flags, this.imageData) : 0;
     }
 
     public NVGImageRenderer(final InputStream inputStream) {
@@ -24,6 +24,10 @@ public final class NVGImageRenderer {
     }
 
     public void drawImage(final float x, final float y, final float width, final float height) {
+        if (!NVGRenderer.isAvailable() || imageHandle == 0) {
+            return;
+        }
+
         nvgImagePattern(
                 VG,
                 x,
@@ -61,6 +65,10 @@ public final class NVGImageRenderer {
     }
 
     public void drawImage(final float x, final float y, final float width, final float height, final int colorOverlay) {
+        if (!NVGRenderer.isAvailable() || imageHandle == 0) {
+            return;
+        }
+
         nvgImagePattern(
                 VG,
                 x,

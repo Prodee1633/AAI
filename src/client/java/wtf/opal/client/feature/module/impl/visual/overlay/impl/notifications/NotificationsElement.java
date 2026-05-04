@@ -41,6 +41,10 @@ public final class NotificationsElement implements IOverlayElement {
 
     @Override
     public void render(final DrawContext context, final float delta, boolean isBloom) {
+        if (!NVGRenderer.isAvailable()) {
+            return;
+        }
+
         final List<Notification> notifications = OpalClient.getInstance().getNotificationManager().getNotifications();
 
         final float padding = 3;

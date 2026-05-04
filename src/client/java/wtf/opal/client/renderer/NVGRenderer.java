@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
+import java.util.Locale;
 
 import static org.lwjgl.nanovg.NanoVG.*;
 import static org.lwjgl.nanovg.NanoVGGL3.*;
@@ -24,7 +25,35 @@ import static wtf.opal.client.Constants.mc;
 
 public final class NVGRenderer {
 
-    private static final long VG = nvgCreate(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+    /**
+     * FCL/Pojav Android runs on bionic, not desktop glibc. The bundled LWJGL NanoVG
+     * Linux natives require libm.so.6 and crash during class initialization.
+     * Keep NanoVG enabled on desktop, but turn it into a safe no-op renderer on Android.
+     */
+    private static final boolean ANDROID_LIKE = Boolean.getBoolean("opal.android.disableNanoVG")
+            || System.getProperty("os.version", "").toLowerCase(Locale.ROOT).contains("android")
+            || System.getProperty("java.vendor", "").toLowerCase(Locale.ROOT).contains("android")
+            || System.getProperty("user.home", "").toLowerCase(Locale.ROOT).contains("/fcl/")
+            || System.getenv("FCL_VERSION_CODE") != null
+            || System.getenv("POJAV_RENDERER") != null;
+
+    private static final long VG = createContext();
+
+    private static long createContext() {
+        if (ANDROID_LIKE) {
+            return 0L;
+        }
+
+        try {
+            return nvgCreate(NVG_ANTIALIAS | NVG_STENCIL_STROKES);
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    public static boolean isAvailable() {
+        return VG != 0L;
+    }
 
     public static final NVGPaint NVG_PAINT = NVGPaint.create();
     public static final NVGPaint BLUR_PAINT = NVGPaint.create();
@@ -37,6 +66,10 @@ public final class NVGRenderer {
     public static float globalAlpha = 1;
 
     public static boolean beginFrame() {
+        if (!isAvailable()) {
+            return false;
+        }
+
         final Window window = mc.getWindow();
         final float scaleFactor = (float) window.getScaleFactor();
 
@@ -62,6 +95,10 @@ public final class NVGRenderer {
     }
 
     public static void endFrame(final boolean createRenderPass) {
+        if (!isAvailable()) {
+            return;
+        }
+
         if (frameStarted) {
             if (createRenderPass) {
                 final Framebuffer framebuffer = mc.getFramebuffer();
@@ -91,10 +128,16 @@ public final class NVGRenderer {
 
     public static void globalAlpha(final float alpha) {
         globalAlpha = alpha;
+        if (!isAvailable()) {
+            return;
+        }
         nvgGlobalAlpha(VG, alpha);
     }
 
     public static void rect(final float x, final float y, final float width, final float height, final int color) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color, NVG_COLOR_1);
 
         nvgBeginPath(VG);
@@ -105,6 +148,9 @@ public final class NVGRenderer {
     }
 
     public static void rect(final float x, final float y, final float width, final float height, final NVGPaint nvgPaint) {
+        if (!isAvailable()) {
+            return;
+        }
         nvgBeginPath(VG);
         nvgFillPaint(VG, nvgPaint);
         nvgRect(VG, x, y, width, height);
@@ -113,6 +159,10 @@ public final class NVGRenderer {
     }
 
     public static void scale(final float factor, final float x, final float y, final float width, final float height, final Runnable content) {
+        if (!isAvailable()) {
+            return;
+        }
+
         final float translateX = x + width / 2F;
         final float translateY = y + height / 2F;
 
@@ -132,6 +182,10 @@ public final class NVGRenderer {
     }
 
     public static void rotate(final double degrees, final float x, final float y, final float width, final float height, final Runnable content) {
+        if (!isAvailable()) {
+            return;
+        }
+
         final float translateX = x + width / 2f;
         final float translateY = y + height / 2f;
 
@@ -150,6 +204,9 @@ public final class NVGRenderer {
     }
 
     public static void rectOutline(final float x, final float y, final float width, final float height, final float thickness, final int color) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color, NVG_COLOR_1);
 
         nvgBeginPath(VG);
@@ -178,6 +235,9 @@ public final class NVGRenderer {
     }
 
     public static void rainbowRect(final float x, final float y, final float width, final float height) {
+        if (!isAvailable()) {
+            return;
+        }
         for (float i = y; i < y + height; i += 0.5f) {
             final float hue = (i - y) / height;
             final int rgbColor = Color.HSBtoRGB(hue, 1, 1);
@@ -191,6 +251,9 @@ public final class NVGRenderer {
     }
 
     public static void roundedRectOutline(final float x, final float y, final float width, final float height, final float radius, final float thickness, final int color) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color, NVG_COLOR_1);
 
         nvgBeginPath(VG);
@@ -211,6 +274,9 @@ public final class NVGRenderer {
     private static final List<ScreenPosition> scissors = new ArrayList<>();
 
     public static void scissor(final float x, final float y, final float width, final float height, final Runnable content) {
+        if (!isAvailable()) {
+            return;
+        }
         ScreenPosition scissor = new ScreenPosition(x, y, width, height);
         scissors.add(scissor);
 
@@ -223,12 +289,18 @@ public final class NVGRenderer {
     }
 
     private static void useCurrentScissors() {
+        if (!isAvailable()) {
+            return;
+        }
         for (ScreenPosition scissor : scissors) {
             nvgIntersectScissor(VG, scissor.getX(), scissor.getY(), scissor.getWidth(), scissor.getHeight());
         }
     }
 
     public static void roundedRect(final float x, final float y, final float width, final float height, final float radius, final int color) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color, NVG_COLOR_1);
 
         nvgBeginPath(VG);
@@ -239,6 +311,9 @@ public final class NVGRenderer {
     }
 
     public static void roundedRectGradient(final float x, final float y, final float width, final float height, final float radius, final int color1, final int color2, final float angleDegrees) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color1, NVG_COLOR_1);
         applyColor(color2, NVG_COLOR_2);
 
@@ -272,6 +347,9 @@ public final class NVGRenderer {
     }
 
     public static void rectGradient(final float x, final float y, final float width, final float height, final int color1, final int color2, final float angleDegrees) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color1, NVG_COLOR_1);
         applyColor(color2, NVG_COLOR_2);
 
@@ -304,6 +382,9 @@ public final class NVGRenderer {
     }
 
     public static void roundedRect(final float x, final float y, final float width, final float height, final float radius, final NVGPaint nvgPaint) {
+        if (!isAvailable()) {
+            return;
+        }
         nvgBeginPath(VG);
         nvgFillPaint(VG, nvgPaint);
         nvgRoundedRect(VG, x, y, width, height, radius);
@@ -312,6 +393,9 @@ public final class NVGRenderer {
     }
 
     public static void roundedRectVarying(final float x, final float y, final float width, final float height, final float radiusTopLeft, final float radiusTopRight, final float radiusBottomRight, final float radiusBottomLeft, final int color) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color, NVG_COLOR_1);
 
         nvgBeginPath(VG);
@@ -332,6 +416,9 @@ public final class NVGRenderer {
     }
 
     public static void roundedRectVaryingGradient(final float x, final float y, final float width, final float height, final float radiusTopLeft, final float radiusTopRight, final float radiusBottomRight, final float radiusBottomLeft, final int color1, final int color2, final float angleDegrees) {
+        if (!isAvailable()) {
+            return;
+        }
         applyColor(color1, NVG_COLOR_1);
         applyColor(color2, NVG_COLOR_2);
 
@@ -368,6 +455,9 @@ public final class NVGRenderer {
     }
 
     public static void roundedRectVarying(final float x, final float y, final float width, final float height, final float radiusTopLeft, final float radiusTopRight, final float radiusBottomRight, final float radiusBottomLeft, final NVGPaint nvgPaint) {
+        if (!isAvailable()) {
+            return;
+        }
         nvgBeginPath(VG);
         nvgFillPaint(VG, nvgPaint);
         nvgRoundedRectVarying(
@@ -386,12 +476,18 @@ public final class NVGRenderer {
     }
 
     public static void applyColor(final int color, final NVGColor nvgColor) {
+        if (!isAvailable()) {
+            return;
+        }
         final int[] rgba = ColorUtility.hexToRGBA(color);
 
         nvgRGBAf(rgba[0] / 255f, rgba[1] / 255f, rgba[2] / 255f, rgba[3] / 255f, nvgColor);
     }
 
     public static void createNVGPaintFromTex(final int width, final int height, final int glTex, final NVGPaint nvgPaint) {
+        if (!isAvailable()) {
+            return;
+        }
         final int imageHandle = nvglCreateImageFromHandle(VG, glTex, width, height, NVG_IMAGE_GENERATE_MIPMAPS | NVG_IMAGE_FLIPY);
 
         nvgImagePattern(VG, 0, 0, mc.getWindow().getScaledWidth(), mc.getWindow().getScaledHeight(), 0, imageHandle, NVG_IMAGE_GENERATE_MIPMAPS, nvgPaint);
