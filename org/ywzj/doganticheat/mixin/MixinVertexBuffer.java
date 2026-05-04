@@ -25,7 +25,7 @@ public abstract class MixinVertexBuffer {
       if (info.getReturnValue() == null) {
          GL.CURRENT_IBO = this.indexBufferId;
       } else {
-         GL.CURRENT_IBO = ((ShapeIndexBufferAccessor)info.getReturnValue()).getId();
+         GL.CURRENT_IBO = ((ShapeIndexBufferAccessor)(Object)info.getReturnValue()).getId();
       }
    }
 }

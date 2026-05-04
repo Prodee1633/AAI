@@ -58,7 +58,7 @@ public class EntityWatcher {
             }
          });
 
-         for (AbstractClientPlayer player : new ArrayList(mc.level.players())) {
+         for (AbstractClientPlayer player : new ArrayList<AbstractClientPlayer>(mc.level.players())) {
             if (player != mc.player) {
                if (!tags.containsKey(player)) {
                   tags.put(player, new HashSet<>());

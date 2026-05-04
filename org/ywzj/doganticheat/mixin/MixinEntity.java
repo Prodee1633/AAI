@@ -35,8 +35,8 @@ public abstract class MixinEntity {
    public final Vec3 getViewVector(float p_20253_) {
       float pitch = this.getViewXRot(p_20253_);
       float yaw = this.getViewYRot(p_20253_);
-      if ((Entity)this == Minecraft.getInstance().player) {
-         EventRayTrace lookEvent = new EventRayTrace((Entity)this, yaw, pitch);
+      if ((Object)this == Minecraft.getInstance().player) {
+         EventRayTrace lookEvent = new EventRayTrace((Entity)(Object)this, yaw, pitch);
          Naven.getInstance().getEventManager().call(lookEvent);
          yaw = lookEvent.yaw;
          pitch = lookEvent.pitch;
@@ -65,7 +65,7 @@ public abstract class MixinEntity {
       at = {@At("RETURN")}
    )
    private void makeStuckInBlock(BlockState pState, Vec3 pMotionMultiplier, CallbackInfo ci) {
-      if (Minecraft.getInstance().player == this) {
+      if (Minecraft.getInstance().player == (Object)this) {
          EventStuckInBlock event = new EventStuckInBlock(pState, pMotionMultiplier);
          Naven.getInstance().getEventManager().call(event);
          if (event.isCancelled()) {

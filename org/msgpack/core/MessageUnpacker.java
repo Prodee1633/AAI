@@ -328,7 +328,7 @@ public class MessageUnpacker implements Closeable {
             int length = this.unpackBinaryHeader();
             return ValueFactory.newBinary(this.readPayload(length), true);
          }
-         case ARRAY:
+         case ARRAY: {
             int size = this.unpackArrayHeader();
             Value[] array = new Value[size];
 
@@ -337,7 +337,8 @@ public class MessageUnpacker implements Closeable {
             }
 
             return ValueFactory.newArray(array, true);
-         case MAP:
+         }
+         case MAP: {
             int size = this.unpackMapHeader();
             Value[] kvs = new Value[size * 2];
 
@@ -347,6 +348,7 @@ public class MessageUnpacker implements Closeable {
             }
 
             return ValueFactory.newMap(kvs, true);
+         }
          case EXTENSION:
             ExtensionTypeHeader extHeader = this.unpackExtensionTypeHeader();
             switch (extHeader.getType()) {
@@ -396,7 +398,7 @@ public class MessageUnpacker implements Closeable {
             var.setBinaryValue(this.readPayload(length));
             return var;
          }
-         case ARRAY:
+         case ARRAY: {
             int size = this.unpackArrayHeader();
             Value[] kvs = new Value[size];
 
@@ -406,7 +408,8 @@ public class MessageUnpacker implements Closeable {
 
             var.setArrayValue(kvs);
             return var;
-         case MAP:
+         }
+         case MAP: {
             int size = this.unpackMapHeader();
             Value[] kvs = new Value[size * 2];
 
@@ -417,6 +420,7 @@ public class MessageUnpacker implements Closeable {
 
             var.setMapValue(kvs);
             return var;
+         }
          case EXTENSION:
             ExtensionTypeHeader extHeader = this.unpackExtensionTypeHeader();
             switch (extHeader.getType()) {

@@ -59,7 +59,7 @@ public abstract class MixinLivingEntity extends Entity {
       cancellable = true
    )
    private void hasEffect(MobEffect pEffect, CallbackInfoReturnable<Boolean> cir) {
-      if (this == Minecraft.getInstance().player) {
+      if ((Object)this == Minecraft.getInstance().player) {
          FullBright fullBright = (FullBright)Naven.getInstance().getModuleManager().getModule(FullBright.class);
          if (pEffect == MobEffects.NIGHT_VISION && fullBright.isEnabled()) {
             cir.setReturnValue(true);
