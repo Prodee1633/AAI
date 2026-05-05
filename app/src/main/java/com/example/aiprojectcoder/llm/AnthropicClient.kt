@@ -33,8 +33,12 @@ class AnthropicClient : LlmClient {
         config: ModelConfig,
         apiKey: String,
         snapshot: ProjectSnapshot,
-        task: String
+        task: String,
+        attachments: List<PromptAttachment>
     ): LlmResponse {
+        val imageAttachments = attachments.filter {
+            it.base64Content != null && it.mimeType in setOf("image/jpeg", "image/png", "image/gif", "image/webp")
+        }
         val body = buildJsonObject {
             put("model", config.model.ifBlank { "claude-sonnet-4-5" })
             put("max_tokens", 8192)
@@ -43,7 +47,26 @@ class AnthropicClient : LlmClient {
             put("messages", buildJsonArray {
                 addJsonObject {
                     put("role", "user")
-                    put("content", CodingPrompt.user(snapshot, task))
+                    if (imageAttachments.isEmpty()) {
+                        put("content", CodingPrompt.user(snapshot, task, attachments))
+                    } else {
+                        put("content", buildJsonArray {
+                            addJsonObject {
+                                put("type", "text")
+                                put("text", CodingPrompt.user(snapshot, task, attachments))
+                            }
+                            imageAttachments.forEach { attachment ->
+                                addJsonObject {
+                                    put("type", "image")
+                                    put("source", buildJsonObject {
+                                        put("type", "base64")
+                                        put("media_type", attachment.mimeType)
+                                        put("data", attachment.base64Content ?: "")
+                                    })
+                                }
+                            }
+                        })
+                    }
                 }
             })
         }

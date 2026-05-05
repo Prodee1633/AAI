@@ -14,6 +14,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -34,7 +35,8 @@ class OpenAiCompatibleClient : LlmClient {
         config: ModelConfig,
         apiKey: String,
         snapshot: ProjectSnapshot,
-        task: String
+        task: String,
+        attachments: List<PromptAttachment>
     ): LlmResponse {
         val body = buildJsonObject {
             put("model", config.model)
@@ -47,7 +49,25 @@ class OpenAiCompatibleClient : LlmClient {
                 }
                 addJsonObject {
                     put("role", "user")
-                    put("content", CodingPrompt.user(snapshot, task))
+                    val imageAttachments = attachments.filter { it.isImage && it.base64Content != null }
+                    if (imageAttachments.isEmpty()) {
+                        put("content", CodingPrompt.user(snapshot, task, attachments))
+                    } else {
+                        put("content", buildJsonArray {
+                            addJsonObject {
+                                put("type", "text")
+                                put("text", CodingPrompt.user(snapshot, task, attachments))
+                            }
+                            imageAttachments.forEach { attachment ->
+                                addJsonObject {
+                                    put("type", "image_url")
+                                    put("image_url", buildJsonObject {
+                                        put("url", "data:${attachment.mimeType};base64,${attachment.base64Content}")
+                                    })
+                                }
+                            }
+                        })
+                    }
                 }
             })
         }

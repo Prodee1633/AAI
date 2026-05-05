@@ -1,37 +1,50 @@
 package com.example.aiprojectcoder.ui
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.SystemClock
+import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedButton
@@ -61,11 +74,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.documentfile.provider.DocumentFile
 import com.example.aiprojectcoder.data.AppRepository
+import com.example.aiprojectcoder.data.ChatAttachmentInfo
 import com.example.aiprojectcoder.data.ChatMessage
 import com.example.aiprojectcoder.data.ChatRole
 import com.example.aiprojectcoder.data.ModelConfig
@@ -77,6 +92,7 @@ import com.example.aiprojectcoder.files.ProjectFileStore
 import com.example.aiprojectcoder.files.ProjectSnapshot
 import com.example.aiprojectcoder.llm.LlmClientFactory
 import com.example.aiprojectcoder.llm.LlmResponse
+import com.example.aiprojectcoder.llm.PromptAttachment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -90,6 +106,13 @@ private enum class AppTab(val label: String, val icon: ImageVector) {
     CHAT("聊天", Icons.Default.Chat),
     SETTINGS("设置", Icons.Default.Settings)
 }
+
+private data class PendingAttachment(
+    val uri: Uri,
+    val name: String,
+    val mimeType: String,
+    val byteSize: Long
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -113,14 +136,15 @@ fun AppScreen() {
     var activeConfigId by remember {
         mutableStateOf(
             repo.readActiveModelConfigId()?.takeIf { id -> initialConfigs.any { it.id == id } }
-                ?: initialConfigs.first().id
+                ?: initialConfigs.firstOrNull()?.id
         )
     }
-    var apiKey by remember { mutableStateOf(repo.readApiKey(activeConfigId)) }
+    var apiKey by remember { mutableStateOf(activeConfigId?.let(repo::readApiKey).orEmpty()) }
     var autoApplyWithoutConfirmation by remember { mutableStateOf(repo.readAutoApplyWithoutConfirmation()) }
 
     var selectedTab by remember { mutableStateOf(AppTab.HOME) }
-    var prompt by remember { mutableStateOf("请帮我修复这个项目的编译问题，并说明做了哪些修改。") }
+    var prompt by remember { mutableStateOf("") }
+    var selectedAttachments by remember { mutableStateOf<List<PendingAttachment>>(emptyList()) }
     var snapshot by remember { mutableStateOf<ProjectSnapshot?>(null) }
     var plan by remember { mutableStateOf<PatchPlan?>(null) }
     var rawModelOutput by remember { mutableStateOf("") }
@@ -129,7 +153,7 @@ fun AppScreen() {
     var messages by remember { mutableStateOf(activeProjectId?.let(repo::readChatMessages).orEmpty()) }
 
     val activeProject = projects.firstOrNull { it.id == activeProjectId }
-    val activeConfig = modelConfigs.firstOrNull { it.id == activeConfigId } ?: modelConfigs.first()
+    val activeConfig = modelConfigs.firstOrNull { it.id == activeConfigId } ?: modelConfigs.firstOrNull()
 
     fun persistProjects(next: List<ProjectProfile>, nextActiveId: String?) {
         projects = next
@@ -175,50 +199,74 @@ fun AppScreen() {
         }
     }
 
-    fun saveModelSettings(showSnackbar: Boolean = true) {
-        repo.saveModelConfigs(modelConfigs)
-        repo.saveActiveModelConfigId(activeConfigId)
-        repo.saveApiKey(activeConfigId, apiKey)
-        repo.saveAutoApplyWithoutConfirmation(autoApplyWithoutConfirmation)
-        if (showSnackbar) {
-            scope.launch { snackbarHostState.showSnackbar("设置已保存") }
+    fun addPendingUris(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        val additions = uris.map { uri ->
+            runCatching { context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            val doc = DocumentFile.fromSingleUri(context, uri)
+            PendingAttachment(
+                uri = uri,
+                name = doc?.name?.takeIf { it.isNotBlank() } ?: uri.lastPathSegment.orEmpty().ifBlank { "attachment" },
+                mimeType = context.contentResolver.getType(uri) ?: doc?.type ?: "application/octet-stream",
+                byteSize = doc?.length() ?: 0L
+            )
         }
+        selectedAttachments = (selectedAttachments + additions).distinctBy { it.uri.toString() }.takeLast(12)
     }
 
-    fun updateActiveConfig(updated: ModelConfig) {
-        modelConfigs = modelConfigs.map { if (it.id == activeConfigId) updated else it }
+    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        addPendingUris(uris)
+    }
+    val imagePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        addPendingUris(uris)
     }
 
-    fun addModelConfig(provider: ProviderType = ProviderType.OPENAI_COMPATIBLE) {
-        saveModelSettings(showSnackbar = false)
-        val config = repo.newModelConfig(provider)
-        modelConfigs = modelConfigs + config
-        activeConfigId = config.id
-        apiKey = ""
-        repo.saveActiveModelConfigId(config.id)
+    fun saveModelConfig(config: ModelConfig, key: String) {
+        val cleaned = config.copy(
+            displayName = config.displayName.ifBlank { config.provider.label },
+            model = config.model.ifBlank {
+                when (config.provider) {
+                    ProviderType.OPENAI_COMPATIBLE -> "gpt-4.1"
+                    ProviderType.GEMINI -> "gemini-2.5-pro"
+                    ProviderType.ANTHROPIC -> "claude-sonnet-4-5"
+                }
+            },
+            baseUrl = if (config.provider == ProviderType.OPENAI_COMPATIBLE) {
+                config.baseUrl.ifBlank { "https://api.openai.com/v1/chat/completions" }
+            } else {
+                ""
+            }
+        )
+        val next = if (modelConfigs.any { it.id == cleaned.id }) {
+            modelConfigs.map { if (it.id == cleaned.id) cleaned else it }
+        } else {
+            modelConfigs + cleaned
+        }
+        modelConfigs = next
+        activeConfigId = cleaned.id
+        apiKey = key
+        repo.saveModelConfigs(next)
+        repo.saveActiveModelConfigId(cleaned.id)
+        repo.saveApiKey(cleaned.id, key)
+        scope.launch { snackbarHostState.showSnackbar("模型配置已保存") }
     }
 
     fun selectModelConfig(configId: String) {
-        saveModelSettings(showSnackbar = false)
         activeConfigId = configId
         apiKey = repo.readApiKey(configId)
         repo.saveActiveModelConfigId(configId)
     }
 
-    fun deleteActiveModelConfig() {
-        if (modelConfigs.size <= 1) {
-            scope.launch { snackbarHostState.showSnackbar("至少保留一个模型配置") }
-            return
-        }
-        val removeId = activeConfigId
-        val next = modelConfigs.filterNot { it.id == removeId }
-        val nextActive = next.first().id
-        repo.clearApiKey(removeId)
+    fun deleteModelConfig(config: ModelConfig) {
+        val next = modelConfigs.filterNot { it.id == config.id }
+        repo.clearApiKey(config.id)
         modelConfigs = next
+        val nextActive = if (activeConfigId == config.id) next.firstOrNull()?.id else activeConfigId
         activeConfigId = nextActive
-        apiKey = repo.readApiKey(nextActive)
+        apiKey = nextActive?.let(repo::readApiKey).orEmpty()
         repo.saveModelConfigs(next)
         repo.saveActiveModelConfigId(nextActive)
+        scope.launch { snackbarHostState.showSnackbar("模型配置已删除") }
     }
 
     fun renameActiveProject(newName: String) {
@@ -265,12 +313,6 @@ fun AppScreen() {
         }
     }
 
-    fun appendProjectMessage(projectId: String, message: ChatMessage) {
-        val next = (messages + message).takeLast(200)
-        messages = next
-        repo.saveChatMessages(projectId, next)
-    }
-
     fun applyPatch() {
         val project = activeProject
         val currentPlan = plan
@@ -298,12 +340,23 @@ fun AppScreen() {
                         role = ChatRole.ASSISTANT,
                         content = "已应用当前修改计划：\n${logs.joinToString("\n")}",
                         thinkingSteps = listOf("已打开项目授权目录", "已执行 ${logs.size} 个文件操作", "已重新扫描项目快照")
-                    )
+                    ),
+                    messages,
+                    repo,
+                    onMessagesChanged = { messages = it }
                 )
             }.onFailure {
                 status = "应用失败：${it.message}"
             }
             busy = false
+        }
+    }
+
+    fun clearCurrentChat() {
+        activeProject?.let {
+            messages = emptyList()
+            repo.clearChatMessages(it.id)
+            status = "对话已清空。"
         }
     }
 
@@ -313,8 +366,14 @@ fun AppScreen() {
         val currentConfig = activeConfig
         val currentApiKey = apiKey
         val task = prompt.trim()
+        val pending = selectedAttachments
         if (project == null) {
             scope.launch { snackbarHostState.showSnackbar("请先在首页选择项目") }
+            return
+        }
+        if (currentConfig == null) {
+            scope.launch { snackbarHostState.showSnackbar("请先在设置页添加一个模型") }
+            selectedTab = AppTab.SETTINGS
             return
         }
         if (currentApiKey.isBlank()) {
@@ -327,20 +386,22 @@ fun AppScreen() {
             selectedTab = AppTab.HOME
             return
         }
-        if (task.isBlank()) {
-            scope.launch { snackbarHostState.showSnackbar("请输入要让 AI 做的事情") }
+        if (task.isBlank() && pending.isEmpty()) {
+            scope.launch { snackbarHostState.showSnackbar("请输入要让 AI 做的事情，或添加文件/图片") }
             return
         }
 
-        saveModelSettings(showSnackbar = false)
         val userMessage = ChatMessage(
             id = UUID.randomUUID().toString(),
             role = ChatRole.USER,
-            content = task
+            content = task.ifBlank { "（仅发送附件）" },
+            attachments = pending.map { ChatAttachmentInfo(it.name, it.mimeType, it.byteSize, sentToModel = false) }
         )
         val startingMessages = (messages + userMessage).takeLast(200)
         messages = startingMessages
         repo.saveChatMessages(project.id, startingMessages)
+        prompt = ""
+        selectedAttachments = emptyList()
 
         busy = true
         plan = null
@@ -354,13 +415,16 @@ fun AppScreen() {
             val startedAt = SystemClock.elapsedRealtime()
             runCatching {
                 withContext(Dispatchers.IO) {
+                    val attachments = loadPromptAttachments(context, pending)
+                    val sentCount = attachments.count { attachmentWillBeSent(currentConfig.provider, it) }
                     val steps = mutableListOf(
                         "已读取项目快照：${currentSnapshot.files.size} 个文本文件",
+                        "已载入附件：${attachments.size} 个，其中 ${sentCount} 个可发送给当前模型接口",
                         "已使用模型配置：${currentConfig.displayName} / ${currentConfig.model}",
                         "已发送请求到模型服务"
                     )
                     val response = LlmClientFactory.create(currentConfig.provider)
-                        .requestPatch(currentConfig, currentApiKey, currentSnapshot, task)
+                        .requestPatch(currentConfig, currentApiKey, currentSnapshot, task, attachments)
                     steps += "已收到模型响应"
                     val parsed = PatchParser.parse(response.content)
                     steps += "已解析 ${parsed.operations.size} 个文件操作"
@@ -383,7 +447,8 @@ fun AppScreen() {
                         applyLogs = applyLogs,
                         updatedSnapshot = updatedSnapshot,
                         thinkingMillis = SystemClock.elapsedRealtime() - startedAt,
-                        thinkingSteps = steps
+                        thinkingSteps = steps,
+                        attachments = attachments
                     )
                 }
             }.onSuccess { result ->
@@ -409,9 +474,19 @@ fun AppScreen() {
                     outputTokens = result.response.outputTokens,
                     thinkingMillis = result.thinkingMillis,
                     thinkingSteps = result.thinkingSteps,
-                    rawModelOutput = result.response.rawResponse
+                    rawModelOutput = result.response.rawResponse,
+                    attachments = result.attachments.map {
+                        ChatAttachmentInfo(
+                            name = it.name,
+                            mimeType = it.mimeType,
+                            byteSize = it.byteSize,
+                            sentToModel = attachmentWillBeSent(currentConfig.provider, it)
+                        )
+                    }
                 )
-                val next = (startingMessages + assistant).takeLast(200)
+                val next = (startingMessages.dropLast(1) + userMessage.copy(
+                    attachments = assistant.attachments
+                ) + assistant).takeLast(200)
                 messages = next
                 repo.saveChatMessages(project.id, next)
                 status = if (result.applyLogs != null) {
@@ -440,32 +515,63 @@ fun AppScreen() {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("AAI") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(if (selectedTab == AppTab.CHAT && activeProject != null) "${activeProject.name}" else "AAI") },
+                actions = {
+                    if (selectedTab == AppTab.CHAT && activeProject != null) {
+                        IconButton(onClick = { selectedTab = AppTab.SETTINGS }) {
+                            Icon(Icons.Default.Settings, contentDescription = "聊天模型设置")
+                        }
+                        IconButton(onClick = ::clearCurrentChat) {
+                            Icon(Icons.Default.Delete, contentDescription = "清空对话")
+                        }
+                    }
+                }
+            )
+        },
         bottomBar = {
-            NavigationBar {
-                AppTab.entries.forEach { tab ->
-                    NavigationBarItem(
-                        selected = selectedTab == tab,
-                        onClick = { selectedTab = tab },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
+                    .navigationBarsPadding()
+            ) {
+                if (selectedTab == AppTab.CHAT && activeProject != null) {
+                    ChatComposer(
+                        prompt = prompt,
+                        onPromptChange = { prompt = it },
+                        attachments = selectedAttachments,
+                        busy = busy,
+                        plan = plan,
+                        autoApplyWithoutConfirmation = autoApplyWithoutConfirmation,
+                        onPickFiles = { filePickerLauncher.launch(arrayOf("*/*")) },
+                        onPickImages = { imagePickerLauncher.launch(arrayOf("image/*")) },
+                        onRemoveAttachment = { attachment ->
+                            selectedAttachments = selectedAttachments.filterNot { it.uri == attachment.uri }
+                        },
+                        onAsk = ::askAiForPatch,
+                        onApplyPatch = ::applyPatch
                     )
+                }
+                NavigationBar {
+                    AppTab.entries.forEach { tab ->
+                        NavigationBarItem(
+                            selected = selectedTab == tab,
+                            onClick = { selectedTab = tab },
+                            icon = { Icon(tab.icon, contentDescription = tab.label) },
+                            label = { Text(tab.label) }
+                        )
+                    }
                 }
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            when (selectedTab) {
-                AppTab.HOME -> HomePage(
+        when (selectedTab) {
+            AppTab.HOME -> ScrollPage(padding) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                HomePage(
                     projects = projects,
                     activeProject = activeProject,
                     snapshot = snapshot,
@@ -478,47 +584,51 @@ fun AppScreen() {
                     onScanProject = ::scanProject,
                     onGoChat = { selectedTab = AppTab.CHAT }
                 )
-                AppTab.CHAT -> ChatPage(
-                    project = activeProject,
-                    modelConfig = activeConfig,
-                    prompt = prompt,
-                    onPromptChange = { prompt = it },
-                    messages = messages,
-                    status = status,
-                    plan = plan,
-                    rawModelOutput = rawModelOutput,
-                    busy = busy,
-                    autoApplyWithoutConfirmation = autoApplyWithoutConfirmation,
-                    onAsk = ::askAiForPatch,
-                    onApplyPatch = ::applyPatch,
-                    onClearChat = {
-                        activeProject?.let {
-                            messages = emptyList()
-                            repo.clearChatMessages(it.id)
-                        }
-                    },
-                    onGoHome = { selectedTab = AppTab.HOME },
-                    onGoSettings = { selectedTab = AppTab.SETTINGS }
-                )
-                AppTab.SETTINGS -> SettingsPage(
+            }
+            AppTab.CHAT -> ChatPage(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                project = activeProject,
+                modelConfig = activeConfig,
+                messages = messages,
+                status = status,
+                plan = plan,
+                rawModelOutput = rawModelOutput,
+                busy = busy,
+                onGoHome = { selectedTab = AppTab.HOME }
+            )
+            AppTab.SETTINGS -> ScrollPage(padding) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                SettingsPage(
                     configs = modelConfigs,
                     activeConfig = activeConfig,
-                    apiKey = apiKey,
+                    activeApiKey = apiKey,
                     autoApplyWithoutConfirmation = autoApplyWithoutConfirmation,
                     onSelectConfig = ::selectModelConfig,
-                    onAddConfig = ::addModelConfig,
-                    onDeleteActiveConfig = ::deleteActiveModelConfig,
-                    onConfigChange = ::updateActiveConfig,
-                    onApiKeyChange = { apiKey = it },
+                    onSaveConfig = ::saveModelConfig,
+                    onDeleteConfig = ::deleteModelConfig,
                     onAutoApplyWithoutConfirmationChange = {
                         autoApplyWithoutConfirmation = it
                         repo.saveAutoApplyWithoutConfirmation(it)
-                    },
-                    onSave = { saveModelSettings() }
+                    }
                 )
             }
         }
     }
+}
+
+@Composable
+private fun ScrollPage(padding: PaddingValues, content: @Composable Column.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        content = content
+    )
 }
 
 @Composable
@@ -623,74 +733,117 @@ private fun ProjectCard(
 
 @Composable
 private fun ChatPage(
+    modifier: Modifier,
     project: ProjectProfile?,
-    modelConfig: ModelConfig,
-    prompt: String,
-    onPromptChange: (String) -> Unit,
+    modelConfig: ModelConfig?,
     messages: List<ChatMessage>,
     status: String,
     plan: PatchPlan?,
     rawModelOutput: String,
     busy: Boolean,
-    autoApplyWithoutConfirmation: Boolean,
-    onAsk: () -> Unit,
-    onApplyPatch: () -> Unit,
-    onClearChat: () -> Unit,
-    onGoHome: () -> Unit,
-    onGoSettings: () -> Unit
+    onGoHome: () -> Unit
 ) {
     if (project == null) {
-        Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("聊天", style = MaterialTheme.typography.titleLarge)
-                Text("请先在首页添加并选择项目。")
-                Button(onClick = onGoHome) { Text("去首页选择项目") }
-            }
+        Column(
+            modifier = modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("聊天", style = MaterialTheme.typography.titleLarge)
+            Text("请先在首页添加并选择项目。")
+            Button(onClick = onGoHome) { Text("去首页选择项目") }
         }
         return
     }
 
-    Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("聊天 / ${project.name}", style = MaterialTheme.typography.titleLarge)
-            Text("当前模型：${modelConfig.displayName} / ${modelConfig.model}")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = onGoSettings, label = { Text("模型设置") })
-                AssistChip(onClick = onGoHome, label = { Text("切换项目") })
-                AssistChip(onClick = onClearChat, label = { Text("清空对话") })
+    LazyColumn(
+        modifier = modifier,
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        if (busy) {
+            item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        }
+        if (modelConfig == null) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Text("还没有模型。请到设置页添加一个模型后再聊天。", Modifier.padding(16.dp))
+                }
+            }
+        }
+        if (messages.isEmpty()) {
+            item {
+                Card { Text("这个项目还没有对话。底部输入需求后，AI 的反馈会保存在这里。", Modifier.padding(16.dp)) }
+            }
+        } else {
+            items(messages, key = { it.id }) { message -> ChatMessageCard(message) }
+        }
+        item { StatusCard(status = status, plan = plan, rawModelOutput = rawModelOutput) }
+    }
+}
+
+@Composable
+private fun ChatComposer(
+    prompt: String,
+    onPromptChange: (String) -> Unit,
+    attachments: List<PendingAttachment>,
+    busy: Boolean,
+    plan: PatchPlan?,
+    autoApplyWithoutConfirmation: Boolean,
+    onPickFiles: () -> Unit,
+    onPickImages: () -> Unit,
+    onRemoveAttachment: (PendingAttachment) -> Unit,
+    onAsk: () -> Unit,
+    onApplyPatch: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (attachments.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    attachments.forEach { attachment ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                "${attachment.name} · ${attachment.mimeType}",
+                                modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            IconButton(onClick = { onRemoveAttachment(attachment) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "移除附件")
+                            }
+                        }
+                    }
+                }
+            }
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                IconButton(onClick = onPickFiles, enabled = !busy) {
+                    Icon(Icons.Default.AttachFile, contentDescription = "添加文件")
+                }
+                IconButton(onClick = onPickImages, enabled = !busy) {
+                    Icon(Icons.Default.Image, contentDescription = "添加图片")
+                }
+                OutlinedTextField(
+                    value = prompt,
+                    onValueChange = onPromptChange,
+                    modifier = Modifier.weight(1f),
+                    minLines = 1,
+                    maxLines = 5,
+                    placeholder = { Text("输入需求") }
+                )
+                IconButton(onClick = onAsk, enabled = !busy) {
+                    Icon(Icons.Default.Send, contentDescription = if (autoApplyWithoutConfirmation) "发送并自动应用" else "发送")
+                }
+            }
+            if (plan != null && !autoApplyWithoutConfirmation) {
+                Button(onClick = onApplyPatch, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("应用当前修改计划")
+                }
             }
         }
     }
-
-    if (messages.isEmpty()) {
-        Card { Text("这个项目还没有对话。输入需求后，AI 的反馈会保存在这里。", Modifier.padding(16.dp)) }
-    } else {
-        messages.forEach { message -> ChatMessageCard(message) }
-    }
-
-    OutlinedTextField(
-        value = prompt,
-        onValueChange = onPromptChange,
-        modifier = Modifier.fillMaxWidth(),
-        minLines = 4,
-        label = { Text("对 AI 提要求") },
-        placeholder = { Text("例如：添加分页、修复构建、重构网络层、生成测试……") }
-    )
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Button(onClick = onAsk, enabled = !busy) {
-            Icon(Icons.Default.AutoFixHigh, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text(if (autoApplyWithoutConfirmation) "发送并自动应用" else "发送")
-        }
-        ElevatedButton(onClick = onApplyPatch, enabled = !busy && plan != null && !autoApplyWithoutConfirmation) {
-            Icon(Icons.Default.PlayArrow, contentDescription = null)
-            Spacer(Modifier.width(8.dp))
-            Text("应用修改")
-        }
-    }
-
-    StatusCard(status = status, plan = plan, rawModelOutput = rawModelOutput)
 }
 
 @Composable
@@ -702,6 +855,15 @@ private fun ChatMessageCard(message: ChatMessage) {
                 Text(message.role.label, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.weight(1f))
                 Text(formatDate(message.createdAtMillis), style = MaterialTheme.typography.bodySmall)
+            }
+            if (message.attachments.isNotEmpty()) {
+                Text(
+                    message.attachments.joinToString("\n") {
+                        val state = if (it.sentToModel) "已发送给模型" else "仅保留记录"
+                        "附件：${it.name} · ${it.mimeType} · ${formatBytes(it.byteSize)} · $state"
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
             SelectionContainer { Text(message.content) }
             val metrics = buildList {
@@ -725,32 +887,33 @@ private fun ChatMessageCard(message: ChatMessage) {
 @Composable
 private fun SettingsPage(
     configs: List<ModelConfig>,
-    activeConfig: ModelConfig,
-    apiKey: String,
+    activeConfig: ModelConfig?,
+    activeApiKey: String,
     autoApplyWithoutConfirmation: Boolean,
     onSelectConfig: (String) -> Unit,
-    onAddConfig: (ProviderType) -> Unit,
-    onDeleteActiveConfig: () -> Unit,
-    onConfigChange: (ModelConfig) -> Unit,
-    onApiKeyChange: (String) -> Unit,
-    onAutoApplyWithoutConfirmationChange: (Boolean) -> Unit,
-    onSave: () -> Unit
+    onSaveConfig: (ModelConfig, String) -> Unit,
+    onDeleteConfig: (ModelConfig) -> Unit,
+    onAutoApplyWithoutConfirmationChange: (Boolean) -> Unit
 ) {
     var configExpanded by remember { mutableStateOf(false) }
-    var providerExpanded by remember { mutableStateOf(false) }
+    var showDialog by remember { mutableStateOf(false) }
+    var editingConfig by remember { mutableStateOf<ModelConfig?>(null) }
+    var editingApiKey by remember { mutableStateOf("") }
+    val uriHandler = LocalUriHandler.current
 
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Key, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text("设置 / 模型配置", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.weight(1f))
-                IconButton(onClick = onSave) { Icon(Icons.Default.Save, contentDescription = "保存") }
+                Text("模型", style = MaterialTheme.typography.titleLarge)
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = { configExpanded = true }, label = { Text(activeConfig.displayName) })
+            if (configs.isEmpty() || activeConfig == null) {
+                Text("还没有模型。请添加一个模型。")
+            } else {
+                Text("当前模型")
+                AssistChip(onClick = { configExpanded = true }, label = { Text("${activeConfig.displayName} / ${activeConfig.model}") })
                 DropdownMenu(expanded = configExpanded, onDismissRequest = { configExpanded = false }) {
                     configs.forEach { config ->
                         DropdownMenuItem(
@@ -762,86 +925,37 @@ private fun SettingsPage(
                         )
                     }
                 }
-                OutlinedButton(onClick = { onAddConfig(ProviderType.OPENAI_COMPATIBLE) }) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Spacer(Modifier.width(8.dp))
-                    Text("新增")
-                }
-                IconButton(onClick = onDeleteActiveConfig) {
-                    Icon(Icons.Default.Delete, contentDescription = "删除当前模型配置")
-                }
-            }
-
-            OutlinedTextField(
-                value = activeConfig.displayName,
-                onValueChange = { onConfigChange(activeConfig.copy(displayName = it)) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("配置名称") },
-                singleLine = true
-            )
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                AssistChip(onClick = { providerExpanded = true }, label = { Text(activeConfig.provider.label) })
-                DropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
-                    ProviderType.entries.forEach { type ->
-                        DropdownMenuItem(
-                            text = { Text(type.label) },
-                            onClick = {
-                                providerExpanded = false
-                                val default = when (type) {
-                                    ProviderType.OPENAI_COMPATIBLE -> activeConfig.copy(
-                                        provider = type,
-                                        displayName = if (activeConfig.displayName.isBlank()) "OpenAI compatible" else activeConfig.displayName,
-                                        model = if (activeConfig.model.isBlank()) "gpt-4.1" else activeConfig.model,
-                                        baseUrl = if (activeConfig.baseUrl.isBlank()) "https://api.openai.com/v1/chat/completions" else activeConfig.baseUrl
-                                    )
-                                    ProviderType.GEMINI -> activeConfig.copy(
-                                        provider = type,
-                                        displayName = if (activeConfig.displayName.isBlank()) "Gemini" else activeConfig.displayName,
-                                        model = if (activeConfig.model.isBlank()) "gemini-2.5-pro" else activeConfig.model,
-                                        baseUrl = ""
-                                    )
-                                    ProviderType.ANTHROPIC -> activeConfig.copy(
-                                        provider = type,
-                                        displayName = if (activeConfig.displayName.isBlank()) "Claude" else activeConfig.displayName,
-                                        model = if (activeConfig.model.isBlank()) "claude-sonnet-4-5" else activeConfig.model,
-                                        baseUrl = ""
-                                    )
-                                }
-                                onConfigChange(default)
-                            }
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = {
+                        editingConfig = activeConfig
+                        editingApiKey = activeApiKey
+                        showDialog = true
+                    }) {
+                        Icon(Icons.Default.Settings, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("编辑当前模型")
+                    }
+                    IconButton(onClick = { onDeleteConfig(activeConfig) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除当前模型")
                     }
                 }
             }
 
-            OutlinedTextField(
-                value = activeConfig.model,
-                onValueChange = { onConfigChange(activeConfig.copy(model = it)) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("模型 ID") },
-                singleLine = true
-            )
-
-            if (activeConfig.provider == ProviderType.OPENAI_COMPATIBLE) {
-                OutlinedTextField(
-                    value = activeConfig.baseUrl,
-                    onValueChange = { onConfigChange(activeConfig.copy(baseUrl = it)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Chat Completions Endpoint") },
-                    singleLine = true
-                )
+            Button(onClick = {
+                editingConfig = ModelConfig(id = UUID.randomUUID().toString())
+                editingApiKey = ""
+                showDialog = true
+            }) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("添加模型")
             }
+        }
+    }
 
-            OutlinedTextField(
-                value = apiKey,
-                onValueChange = onApiKeyChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API Key（按模型配置单独保存）") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation()
-            )
-
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("行为", style = MaterialTheme.typography.titleLarge)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("无需用户确认直接应用")
@@ -855,8 +969,6 @@ private fun SettingsPage(
                     onCheckedChange = onAutoApplyWithoutConfirmationChange
                 )
             }
-
-            TextButton(onClick = onSave) { Text("保存当前设置") }
         }
     }
 
@@ -866,9 +978,127 @@ private fun SettingsPage(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("关于", style = MaterialTheme.typography.titleMedium)
             Text("开发者：Prodee163")
-            Text("Github 仓库：Prodee1633/AAI")
+            Text(
+                "Github 仓库：https://github.com/Prodee1633/AAI",
+                modifier = Modifier.clickable { uriHandler.openUri("https://github.com/Prodee1633/AAI") },
+                color = MaterialTheme.colorScheme.primary
+            )
         }
     }
+
+    if (showDialog && editingConfig != null) {
+        ModelConfigDialog(
+            initialConfig = editingConfig!!,
+            initialApiKey = editingApiKey,
+            onDismiss = { showDialog = false },
+            onSave = { config, key ->
+                showDialog = false
+                onSaveConfig(config, key)
+            }
+        )
+    }
+}
+
+@Composable
+private fun ModelConfigDialog(
+    initialConfig: ModelConfig,
+    initialApiKey: String,
+    onDismiss: () -> Unit,
+    onSave: (ModelConfig, String) -> Unit
+) {
+    var displayName by remember(initialConfig.id) { mutableStateOf(initialConfig.displayName) }
+    var provider by remember(initialConfig.id) { mutableStateOf(initialConfig.provider) }
+    var model by remember(initialConfig.id) { mutableStateOf(initialConfig.model) }
+    var baseUrl by remember(initialConfig.id) { mutableStateOf(initialConfig.baseUrl) }
+    var apiKey by remember(initialConfig.id) { mutableStateOf(initialApiKey) }
+    var providerExpanded by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("模型设置") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("配置名称") },
+                    singleLine = true
+                )
+                AssistChip(onClick = { providerExpanded = true }, label = { Text(provider.label) })
+                DropdownMenu(expanded = providerExpanded, onDismissRequest = { providerExpanded = false }) {
+                    ProviderType.entries.forEach { type ->
+                        DropdownMenuItem(
+                            text = { Text(type.label) },
+                            onClick = {
+                                providerExpanded = false
+                                provider = type
+                                when (type) {
+                                    ProviderType.OPENAI_COMPATIBLE -> {
+                                        if (displayName.isBlank()) displayName = "OpenAI compatible"
+                                        if (model.isBlank()) model = "gpt-4.1"
+                                        if (baseUrl.isBlank()) baseUrl = "https://api.openai.com/v1/chat/completions"
+                                    }
+                                    ProviderType.GEMINI -> {
+                                        if (displayName.isBlank()) displayName = "Gemini"
+                                        if (model.isBlank()) model = "gemini-2.5-pro"
+                                        baseUrl = ""
+                                    }
+                                    ProviderType.ANTHROPIC -> {
+                                        if (displayName.isBlank()) displayName = "Claude"
+                                        if (model.isBlank()) model = "claude-sonnet-4-5"
+                                        baseUrl = ""
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("模型 ID") },
+                    singleLine = true
+                )
+                if (provider == ProviderType.OPENAI_COMPATIBLE) {
+                    OutlinedTextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Chat Completions Endpoint") },
+                        singleLine = true
+                    )
+                }
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("API Key") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation()
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                onSave(
+                    initialConfig.copy(
+                        displayName = displayName,
+                        provider = provider,
+                        model = model,
+                        baseUrl = if (provider == ProviderType.OPENAI_COMPATIBLE) baseUrl else ""
+                    ),
+                    apiKey
+                )
+            }) {
+                Icon(Icons.Default.Save, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("保存")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable
@@ -883,6 +1113,7 @@ private fun StatusCard(
             SelectionContainer { Text(status) }
 
             if (plan != null) {
+                HorizontalDivider()
                 Text("当前修改计划", style = MaterialTheme.typography.titleSmall)
                 SelectionContainer {
                     Text(
@@ -897,6 +1128,7 @@ private fun StatusCard(
             }
 
             if (rawModelOutput.isNotBlank()) {
+                HorizontalDivider()
                 Text("模型原始输出", style = MaterialTheme.typography.titleSmall)
                 SelectionContainer {
                     Text(rawModelOutput.take(6000), fontFamily = FontFamily.Monospace)
@@ -912,8 +1144,78 @@ private data class PatchRequestResult(
     val applyLogs: List<String>? = null,
     val updatedSnapshot: ProjectSnapshot? = null,
     val thinkingMillis: Long,
-    val thinkingSteps: List<String>
+    val thinkingSteps: List<String>,
+    val attachments: List<PromptAttachment> = emptyList()
 )
+
+private fun appendProjectMessage(
+    projectId: String,
+    message: ChatMessage,
+    currentMessages: List<ChatMessage>,
+    repo: AppRepository,
+    onMessagesChanged: (List<ChatMessage>) -> Unit
+) {
+    val next = (currentMessages + message).takeLast(200)
+    onMessagesChanged(next)
+    repo.saveChatMessages(projectId, next)
+}
+
+private fun resolvePromptAttachment(context: Context, pending: PendingAttachment): PromptAttachment? {
+    val resolver = context.contentResolver
+    val bytes = resolver.openInputStream(pending.uri)?.use { it.readBytes() } ?: return null
+    val maxTextBytes = 1_000_000
+    val maxBinaryBytes = 5_000_000
+    return when {
+        isTextLike(pending.name, pending.mimeType) -> {
+            val clipped = if (bytes.size > maxTextBytes) bytes.copyOf(maxTextBytes) else bytes
+            PromptAttachment(
+                name = pending.name,
+                mimeType = pending.mimeType,
+                byteSize = pending.byteSize.takeIf { it > 0L } ?: bytes.size.toLong(),
+                textContent = clipped.toString(Charsets.UTF_8) + if (bytes.size > maxTextBytes) "\n\n[已截断：文件超过 1MB]" else ""
+            )
+        }
+        pending.mimeType.startsWith("image/") || pending.mimeType.equals("application/pdf", ignoreCase = true) -> {
+            if (bytes.size > maxBinaryBytes) {
+                PromptAttachment(pending.name, pending.mimeType, pending.byteSize.takeIf { it > 0L } ?: bytes.size.toLong())
+            } else {
+                PromptAttachment(
+                    name = pending.name,
+                    mimeType = pending.mimeType,
+                    byteSize = pending.byteSize.takeIf { it > 0L } ?: bytes.size.toLong(),
+                    base64Content = Base64.encodeToString(bytes, Base64.NO_WRAP)
+                )
+            }
+        }
+        else -> PromptAttachment(pending.name, pending.mimeType, pending.byteSize.takeIf { it > 0L } ?: bytes.size.toLong())
+    }
+}
+
+private fun loadPromptAttachments(context: Context, pending: List<PendingAttachment>): List<PromptAttachment> = pending.mapNotNull {
+    runCatching { resolvePromptAttachment(context, it) }.getOrNull()
+}
+
+private fun attachmentWillBeSent(provider: ProviderType, attachment: PromptAttachment): Boolean {
+    if (attachment.textContent != null) return true
+    if (attachment.base64Content == null) return false
+    return when (provider) {
+        ProviderType.OPENAI_COMPATIBLE -> attachment.isImage
+        ProviderType.GEMINI -> attachment.isImage || attachment.isPdf
+        ProviderType.ANTHROPIC -> attachment.mimeType in setOf("image/jpeg", "image/png", "image/gif", "image/webp")
+    }
+}
+
+private fun isTextLike(name: String, mimeType: String): Boolean {
+    val lowerName = name.lowercase(Locale.getDefault())
+    val lowerMime = mimeType.lowercase(Locale.getDefault())
+    if (lowerMime.startsWith("text/")) return true
+    if (lowerMime in setOf("application/json", "application/xml", "application/javascript", "application/x-yaml")) return true
+    return listOf(
+        ".kt", ".kts", ".java", ".gradle", ".xml", ".json", ".md", ".txt", ".yml", ".yaml",
+        ".toml", ".properties", ".html", ".css", ".js", ".ts", ".tsx", ".jsx", ".py", ".sh",
+        ".c", ".cpp", ".h", ".hpp", ".rs", ".go", ".swift", ".php", ".rb", ".sql"
+    ).any { lowerName.endsWith(it) }
+}
 
 private fun formatDate(millis: Long): String = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(millis))
 
@@ -921,4 +1223,11 @@ private fun formatDuration(millis: Long): String = when {
     millis < 1000 -> "${millis}ms"
     millis < 60_000 -> "${millis / 1000.0}s"
     else -> "${millis / 60_000}m ${millis % 60_000 / 1000}s"
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes <= 0L -> "未知大小"
+    bytes < 1024 -> "${bytes}B"
+    bytes < 1024 * 1024 -> "${bytes / 1024}KB"
+    else -> "${bytes / 1024 / 1024}MB"
 }

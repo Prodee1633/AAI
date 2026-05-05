@@ -9,6 +9,14 @@ enum class ChatRole(val label: String) {
 }
 
 @Serializable
+data class ChatAttachmentInfo(
+    val name: String,
+    val mimeType: String = "application/octet-stream",
+    val byteSize: Long = 0L,
+    val sentToModel: Boolean = false
+)
+
+@Serializable
 data class ChatMessage(
     val id: String,
     val role: ChatRole,
@@ -18,5 +26,6 @@ data class ChatMessage(
     val outputTokens: Long? = null,
     val thinkingMillis: Long? = null,
     val thinkingSteps: List<String> = emptyList(),
-    val rawModelOutput: String = ""
+    val rawModelOutput: String = "",
+    val attachments: List<ChatAttachmentInfo> = emptyList()
 )

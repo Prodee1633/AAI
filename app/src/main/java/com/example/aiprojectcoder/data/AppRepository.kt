@@ -50,13 +50,16 @@ class AppRepository(context: Context) {
         val migrated = oldRaw
             ?.let { runCatching { json.decodeFromString<ModelConfig>(it) }.getOrNull() }
             ?.copy(id = "default")
-            ?: ModelConfig(id = "default")
-        saveModelConfigs(listOf(migrated))
-        saveActiveModelConfigId(migrated.id)
+        if (migrated != null) {
+            saveModelConfigs(listOf(migrated))
+            saveActiveModelConfigId(migrated.id)
 
-        val oldKey = secrets.readApiKey("active")
-        if (oldKey.isNotBlank()) secrets.saveApiKey(migrated.id, oldKey)
-        return listOf(migrated)
+            val oldKey = secrets.readApiKey("active")
+            if (oldKey.isNotBlank()) secrets.saveApiKey(migrated.id, oldKey)
+            return listOf(migrated)
+        }
+
+        return emptyList()
     }
 
     fun saveModelConfigs(configs: List<ModelConfig>) {

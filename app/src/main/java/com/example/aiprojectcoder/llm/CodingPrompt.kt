@@ -18,23 +18,44 @@ object CodingPrompt {
         - For op=write, content must be the complete replacement file content.
         - Do not include Markdown fences unless the JSON is the only fenced block.
         - Do not modify generated build folders, .git, .gradle, build, node_modules, or binary files.
+        - If attachments are provided, use them as context. Only reference file names in your summary when relevant.
     """.trimIndent()
 
-    fun user(snapshot: ProjectSnapshot, task: String): String {
+    fun user(snapshot: ProjectSnapshot, task: String, attachments: List<PromptAttachment> = emptyList()): String {
         val files = snapshot.files.joinToString("\n\n") { file ->
             "--- FILE: ${file.path} ---\n${file.content}"
         }
-        return """
-            Project root: ${snapshot.rootName}
-
-            File tree:
-            ${snapshot.treeText()}
-
-            Task:
-            $task
-
-            Current files:
-            $files
-        """.trimIndent()
+        val attachmentText = attachments
+            .filter { it.textContent != null }
+            .joinToString("\n\n") { attachment ->
+                "--- ATTACHMENT: ${attachment.name} (${attachment.mimeType}, ${attachment.byteSize} bytes) ---\n${attachment.textContent}"
+            }
+        val binaryText = attachments
+            .filter { it.textContent == null }
+            .joinToString("\n") { attachment ->
+                "- ${attachment.name} (${attachment.mimeType}, ${attachment.byteSize} bytes)"
+            }
+        return buildString {
+            appendLine("Project root: ${snapshot.rootName}")
+            appendLine()
+            appendLine("File tree:")
+            appendLine(snapshot.treeText())
+            appendLine()
+            appendLine("Task:")
+            appendLine(task.ifBlank { "Use the attached context to decide the requested code changes." })
+            if (attachmentText.isNotBlank()) {
+                appendLine()
+                appendLine("Text attachments:")
+                appendLine(attachmentText)
+            }
+            if (binaryText.isNotBlank()) {
+                appendLine()
+                appendLine("Binary or multimodal attachments also provided:")
+                appendLine(binaryText)
+            }
+            appendLine()
+            appendLine("Current files:")
+            appendLine(files)
+        }.trim()
     }
 }

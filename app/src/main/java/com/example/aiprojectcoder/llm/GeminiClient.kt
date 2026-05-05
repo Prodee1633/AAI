@@ -12,7 +12,6 @@ import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
@@ -33,15 +32,25 @@ class GeminiClient : LlmClient {
         config: ModelConfig,
         apiKey: String,
         snapshot: ProjectSnapshot,
-        task: String
+        task: String,
+        attachments: List<PromptAttachment>
     ): LlmResponse {
-        val prompt = CodingPrompt.system() + "\n\n" + CodingPrompt.user(snapshot, task)
+        val prompt = CodingPrompt.system() + "\n\n" + CodingPrompt.user(snapshot, task, attachments)
+        val inlineAttachments = attachments.filter { it.canSendInlineBinary }
         val body = buildJsonObject {
             put("contents", buildJsonArray {
                 addJsonObject {
                     put("role", "user")
                     put("parts", buildJsonArray {
                         addJsonObject { put("text", prompt) }
+                        inlineAttachments.forEach { attachment ->
+                            addJsonObject {
+                                put("inlineData", buildJsonObject {
+                                    put("mimeType", attachment.mimeType)
+                                    put("data", attachment.base64Content ?: "")
+                                })
+                            }
+                        }
                     })
                 }
             })
