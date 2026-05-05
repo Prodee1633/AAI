@@ -33,10 +33,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -74,6 +76,7 @@ fun AppScreen() {
 
     var config by remember { mutableStateOf(repo.readConfig()) }
     var apiKey by remember { mutableStateOf(repo.readApiKey()) }
+    var autoApplyWithoutConfirmation by remember { mutableStateOf(repo.readAutoApplyWithoutConfirmation()) }
     var projectUri by remember { mutableStateOf(repo.readProjectUri()) }
     var prompt by remember { mutableStateOf("把这个项目升级为 Material 3 风格，并修复明显的编译问题。") }
     var snapshot by remember { mutableStateOf<ProjectSnapshot?>(null) }
@@ -92,10 +95,13 @@ fun AppScreen() {
         }
     }
 
-    fun saveSettings() {
+    fun saveSettings(showSnackbar: Boolean = true) {
         repo.saveConfig(config)
         repo.saveApiKey(apiKey)
-        scope.launch { snackbarHostState.showSnackbar("配置已保存") }
+        repo.saveAutoApplyWithoutConfirmation(autoApplyWithoutConfirmation)
+        if (showSnackbar) {
+            scope.launch { snackbarHostState.showSnackbar("配置已保存") }
+        }
     }
 
     fun scanProject() {
@@ -123,40 +129,6 @@ fun AppScreen() {
         }
     }
 
-    fun askAiForPatch() {
-        val currentSnapshot = snapshot
-        if (apiKey.isBlank()) {
-            scope.launch { snackbarHostState.showSnackbar("请先填写 API Key") }
-            return
-        }
-        if (currentSnapshot == null) {
-            scope.launch { snackbarHostState.showSnackbar("请先扫描项目") }
-            return
-        }
-        saveSettings()
-        busy = true
-        plan = null
-        status = "正在请求模型生成修改计划……"
-        scope.launch {
-            runCatching {
-                withContext(Dispatchers.IO) {
-                    val client = LlmClientFactory.create(config.provider)
-                    val output = client.requestPatch(config, apiKey, currentSnapshot, prompt)
-                    val parsed = PatchParser.parse(output)
-                    output to parsed
-                }
-            }.onSuccess { (output, parsed) ->
-                rawModelOutput = output
-                plan = parsed
-                status = "模型生成了 ${parsed.operations.size} 个文件操作。请检查后再应用。"
-            }.onFailure {
-                status = "生成失败：${it.message}"
-                rawModelOutput = it.stackTraceToString()
-            }
-            busy = false
-        }
-    }
-
     fun applyPatch() {
         val uri = projectUri
         val currentPlan = plan
@@ -169,13 +141,71 @@ fun AppScreen() {
         scope.launch {
             runCatching {
                 withContext(Dispatchers.IO) {
-                    ProjectFileStore(context, uri).apply(currentPlan)
+                    val store = ProjectFileStore(context, uri)
+                    val logs = store.apply(currentPlan)
+                    val updatedSnapshot = store.snapshot()
+                    logs to updatedSnapshot
                 }
-            }.onSuccess { logs ->
-                status = "已应用：\n${logs.joinToString("\n")}" 
-                scanProject()
+            }.onSuccess { (logs, updatedSnapshot) ->
+                snapshot = updatedSnapshot
+                status = "已应用：\n${logs.joinToString("\n")}"
             }.onFailure {
                 status = "应用失败：${it.message}"
+            }
+            busy = false
+        }
+    }
+
+    fun askAiForPatch() {
+        val currentSnapshot = snapshot
+        val uri = projectUri
+        if (apiKey.isBlank()) {
+            scope.launch { snackbarHostState.showSnackbar("请先填写 API Key") }
+            return
+        }
+        if (currentSnapshot == null) {
+            scope.launch { snackbarHostState.showSnackbar("请先扫描项目") }
+            return
+        }
+        if (autoApplyWithoutConfirmation && uri == null) {
+            scope.launch { snackbarHostState.showSnackbar("自动应用需要先选择项目文件夹") }
+            return
+        }
+        saveSettings(showSnackbar = false)
+        busy = true
+        plan = null
+        status = if (autoApplyWithoutConfirmation) {
+            "正在请求模型生成修改计划；生成后会自动写入项目……"
+        } else {
+            "正在请求模型生成修改计划……"
+        }
+        scope.launch {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val client = LlmClientFactory.create(config.provider)
+                    val output = client.requestPatch(config, apiKey, currentSnapshot, prompt)
+                    val parsed = PatchParser.parse(output)
+                    if (autoApplyWithoutConfirmation) {
+                        val store = ProjectFileStore(context, requireNotNull(uri))
+                        val logs = store.apply(parsed)
+                        val updatedSnapshot = store.snapshot()
+                        PatchRequestResult(output, parsed, logs, updatedSnapshot)
+                    } else {
+                        PatchRequestResult(output, parsed)
+                    }
+                }
+            }.onSuccess { result ->
+                rawModelOutput = result.output
+                plan = result.plan
+                if (result.applyLogs != null) {
+                    snapshot = result.updatedSnapshot ?: snapshot
+                    status = "模型生成了 ${result.plan.operations.size} 个文件操作，并已自动应用：\n${result.applyLogs.joinToString("\n")}"
+                } else {
+                    status = "模型生成了 ${result.plan.operations.size} 个文件操作。请检查后再应用。"
+                }
+            }.onFailure {
+                status = "生成失败：${it.message}"
+                rawModelOutput = it.stackTraceToString()
             }
             busy = false
         }
@@ -200,7 +230,9 @@ fun AppScreen() {
                 onConfigChange = { config = it },
                 apiKey = apiKey,
                 onApiKeyChange = { apiKey = it },
-                onSave = ::saveSettings
+                autoApplyWithoutConfirmation = autoApplyWithoutConfirmation,
+                onAutoApplyWithoutConfirmationChange = { autoApplyWithoutConfirmation = it },
+                onSave = { saveSettings() }
             )
 
             Card(colors = CardDefaults.cardColors()) {
@@ -233,9 +265,9 @@ fun AppScreen() {
                 Button(onClick = ::askAiForPatch, enabled = !busy) {
                     Icon(Icons.Default.AutoFixHigh, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
-                    Text("生成修改计划")
+                    Text(if (autoApplyWithoutConfirmation) "生成并自动应用" else "生成修改计划")
                 }
-                ElevatedButton(onClick = ::applyPatch, enabled = !busy && plan != null) {
+                ElevatedButton(onClick = { applyPatch() }, enabled = !busy && plan != null) {
                     Icon(Icons.Default.PlayArrow, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
                     Text("应用到项目")
@@ -253,6 +285,8 @@ private fun SettingsCard(
     onConfigChange: (ModelConfig) -> Unit,
     apiKey: String,
     onApiKeyChange: (String) -> Unit,
+    autoApplyWithoutConfirmation: Boolean,
+    onAutoApplyWithoutConfirmationChange: (Boolean) -> Unit,
     onSave: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -315,6 +349,20 @@ private fun SettingsCard(
                 visualTransformation = PasswordVisualTransformation()
             )
 
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("无需用户确认直接应用")
+                    Text(
+                        "开启后，模型生成修改计划后会立即写入已授权项目文件夹；默认关闭。",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                Switch(
+                    checked = autoApplyWithoutConfirmation,
+                    onCheckedChange = onAutoApplyWithoutConfirmationChange
+                )
+            }
+
             TextButton(onClick = onSave) { Text("保存配置与密钥") }
         }
     }
@@ -340,7 +388,7 @@ private fun StatusCard(
             }
 
             if (plan != null) {
-                Text("待应用修改")
+                Text("修改计划")
                 SelectionContainer {
                     Text(
                         buildString {
@@ -364,3 +412,10 @@ private fun StatusCard(
         }
     }
 }
+
+private data class PatchRequestResult(
+    val output: String,
+    val plan: PatchPlan,
+    val applyLogs: List<String>? = null,
+    val updatedSnapshot: ProjectSnapshot? = null
+)

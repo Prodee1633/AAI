@@ -5,7 +5,7 @@
 ## 已实现
 
 - Material 3 / dynamic color UI
-- 手动输入并保存 API Key
+- 手动输入并加密保存 API Key
 - 支持三类模型接口：
   - OpenAI-compatible：OpenAI、OpenRouter、Mistral 等兼容 Chat Completions 的接口
   - Google Gemini generateContent
@@ -14,12 +14,14 @@
 - 扫描项目中的文本源码文件
 - 把项目上下文和任务发给模型
 - 模型返回 JSON PatchPlan
-- 用户检查后，点击“应用到项目”执行 write / append / delete / mkdir
+- 默认流程：用户检查修改计划后，点击“应用到项目”执行 write / append / delete / mkdir
+- 可选流程：打开“无需用户确认直接应用”开关后，模型生成修改计划后立即写入已授权项目目录
+- GitHub Actions：每次 push 自动构建 debug APK 并上传 artifact
 
 ## 使用
 
 1. 用 Android Studio 打开本目录。
-2. 确认本机安装了 Android SDK 36。
+2. 确认本机安装了 Android SDK 36 / Build Tools 36。
 3. Sync Gradle。
 4. 运行到真机或模拟器。
 5. 选择项目文件夹。
@@ -27,6 +29,18 @@
 7. 点击“扫描项目”。
 8. 输入任务，点击“生成修改计划”。
 9. 检查计划后点击“应用到项目”。
+
+如果你想让模型生成后直接写入文件，在“模型配置”卡片里打开“无需用户确认直接应用”。这个开关默认关闭；开启后请只对已经提交到 Git、能随时回滚的项目使用。
+
+## GitHub Actions
+
+仓库包含 `.github/workflows/android-build.yml`。每次 push 会执行：
+
+```bash
+gradle :app:assembleDebug --stacktrace
+```
+
+构建产物会作为 `AIProjectCoder-debug-apk` artifact 上传。
 
 ## OpenAI-compatible Endpoint 示例
 
@@ -42,6 +56,8 @@
 2. App 扫描文本文件。
 3. 模型生成 JSON 修改计划。
 4. 用户确认后才写入文件。
+
+如果打开“无需用户确认直接应用”，第 4 步会被跳过，模型输出会直接写入已授权项目目录。
 
 建议继续增强：
 
@@ -65,4 +81,3 @@
   ]
 }
 ```
-

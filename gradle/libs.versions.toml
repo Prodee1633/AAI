@@ -2,7 +2,7 @@
 agp = "9.1.1"
 kotlin = "2.3.21"
 composeBom = "2026.04.01"
-activityCompose = "1.13.0"
+activityCompose = "1.12.4"
 coroutines = "1.10.2"
 documentfile = "1.1.0"
 ktor = "3.4.1"
@@ -25,6 +25,5 @@ ktor-serialization-json = { module = "io.ktor:ktor-serialization-kotlinx-json", 
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }

@@ -29,4 +29,10 @@ class AppRepository(context: Context) {
     fun saveProjectUri(uri: Uri) {
         prefs.edit().putString("project_uri", uri.toString()).apply()
     }
+
+    fun readAutoApplyWithoutConfirmation(): Boolean = prefs.getBoolean("auto_apply_without_confirmation", false)
+
+    fun saveAutoApplyWithoutConfirmation(enabled: Boolean) {
+        prefs.edit().putBoolean("auto_apply_without_confirmation", enabled).apply()
+    }
 }
