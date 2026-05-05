@@ -3,6 +3,7 @@ package com.heypixel.heypixel.VcX6svVqmeT8.ui;
 import com.heypixel.heypixel.VcX6svVqmeT8.Naven;
 import com.heypixel.heypixel.VcX6svVqmeT8.events.api.EventTarget;
 import com.heypixel.heypixel.VcX6svVqmeT8.events.impl.EventShader;
+import com.heypixel.heypixel.VcX6svVqmeT8.events.api.types.EventType;
 import com.heypixel.heypixel.VcX6svVqmeT8.modules.Category;
 import com.heypixel.heypixel.VcX6svVqmeT8.modules.Module;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.Colors;
@@ -10,7 +11,6 @@ import com.heypixel.heypixel.VcX6svVqmeT8.utils.FontIcons;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.MathUtils;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.RenderUtils;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.SmoothAnimationTimer;
-import com.heypixel.heypixel.VcX6svVqmeT8.utils.StencilUtils;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.StringUtils;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.TimeHelper;
 import com.heypixel.heypixel.VcX6svVqmeT8.utils.renderer.Fonts;
@@ -263,10 +263,20 @@ public class ClickGUI extends Screen {
       return true;
    }
 
+   private void drawWindowBackground(PoseStack stack, int bodyColor, int headerColor) {
+      float width = Math.max(1.0F, this.widthAnimation.value);
+      float height = Math.max(1.0F, this.heightAnimation.value);
+      RenderUtils.drawRoundedRect(stack, windowX, windowY, width, height, 5.0F, bodyColor);
+      RenderUtils.drawRoundedRect(stack, windowX, windowY, width, Math.min(24.0F, height), 5.0F, headerColor);
+      if (height > 5.0F) {
+         RenderUtils.fill(stack, windowX, windowY + 5.0F, windowX + width, windowY + Math.min(24.0F, height), headerColor);
+      }
+   }
+
    @EventTarget
    public void onShader(EventShader e) {
-      if (mc.screen == this) {
-         RenderUtils.drawRoundedRect(e.getStack(), windowX, windowY, this.widthAnimation.value, this.heightAnimation.value, 5.0F, 1073741824);
+      if (mc.screen == this && (e.getType() == EventType.BLUR || e.getType() == EventType.SHADOW)) {
+         this.drawWindowBackground(e.getStack(), 1073741824, 1073741824);
       }
    }
 
@@ -285,7 +295,7 @@ public class ClickGUI extends Screen {
 
       this.widthAnimation.update(true);
       this.heightAnimation.update(true);
-      RenderUtils.drawRoundedRect(stack, windowX, windowY, this.widthAnimation.value, this.heightAnimation.value, 5.0F, Colors.getColor(0, 0, 0, 40));
+      this.drawWindowBackground(stack, Colors.getColor(0, 0, 0, 92), Colors.getColor(12, 12, 12, 118));
 
       for (Category value : Category.values()) {
          SmoothAnimationTimer xAnimation = this.categoryXAnimation.get(value);
@@ -361,9 +371,6 @@ public class ClickGUI extends Screen {
          this.titleAnimation.target = 4.0F;
       }
 
-      StencilUtils.write(false);
-      RenderUtils.fill(stack, windowX, windowY + 20.0F, windowX + this.widthAnimation.value, windowY + this.heightAnimation.value - 5.0F, Integer.MIN_VALUE);
-      StencilUtils.erase(true);
       List<Module> inList = this.modules.get(this.selectedCategory);
       if (inList != null) {
          this.categoryModules = inList;
@@ -378,6 +385,8 @@ public class ClickGUI extends Screen {
       }
 
       if (this.categoryModules != null) {
+         RenderUtils.beginScissor(windowX + 5.0F, windowY + 20.0F, 128.0F, Math.max(1.0F, this.heightAnimation.value - 25.0F));
+         try {
          float renderModuleHeight = 0.0F;
          this.minCatY = windowHeight - 25.0F;
 
@@ -450,9 +459,14 @@ public class ClickGUI extends Screen {
                RenderUtils.reAlpha(3630060, this.moduleAlphaAnimation.value / 255.0F)
             );
          }
+         } finally {
+            RenderUtils.endScissor();
+         }
       }
 
       if (this.renderValues != null) {
+         RenderUtils.beginScissor(windowX + 135.0F, windowY + 20.0F, Math.max(1.0F, this.widthAnimation.value - 140.0F), Math.max(1.0F, this.heightAnimation.value - 25.0F));
+         try {
          boolean isValueInBound = RenderUtils.isHoveringBound(mouseX, mouseY, windowX + 140.0F, windowY + 20.0F, windowWidth - 155.0F, windowHeight - 25.0F);
          float motion = this.moduleValuesMotionY.value;
          if (this.moduleValuesMotionY.target < -this.finalValueHeight) {
@@ -612,6 +626,9 @@ public class ClickGUI extends Screen {
                RenderUtils.reAlpha(3630060, this.valuesAlphaAnimation.value / 255.0F)
             );
          }
+         } finally {
+            RenderUtils.endScissor();
+         }
       }
 
       if (this.draggingFloatValue != null) {
@@ -696,8 +713,6 @@ public class ClickGUI extends Screen {
             .render(stack, FontIcons.RESIZE, windowX + this.widthAnimation.value - 10.0F, windowY + this.heightAnimation.value - 10.0F, Color.WHITE, false, 0.3);
          Fonts.icons.setAlpha(1.0F);
       }
-
-      StencilUtils.dispose();
    }
 
    public void SetDragPosition(double x, double y) {

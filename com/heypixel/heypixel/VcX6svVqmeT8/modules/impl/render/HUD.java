@@ -36,6 +36,8 @@ public class HUD extends Module {
    public static final int headerColor = new Color(150, 45, 45, 255).getRGB();
    public static final int bodyColor = new Color(0, 0, 0, 120).getRGB();
    public static final int backgroundColor = new Color(0, 0, 0, 40).getRGB();
+   private static final float WATERMARK_RADIUS = 5.0F;
+   private static final float ARRAY_LIST_RADIUS = 3.0F;
    private static final SimpleDateFormat format = new SimpleDateFormat("HH:mm:ss");
    public BooleanValue waterMark = ValueBuilder.create(this, "Water Mark").setDefaultBooleanValue(true).build().getBooleanValue();
    public FloatValue watermarkSize = ValueBuilder.create(this, "Watermark Size")
@@ -48,6 +50,7 @@ public class HUD extends Module {
       .getFloatValue();
    public BooleanValue moduleToggleSound = ValueBuilder.create(this, "Module Toggle Sound").setDefaultBooleanValue(true).build().getBooleanValue();
    public BooleanValue notification = ValueBuilder.create(this, "Notification").setDefaultBooleanValue(true).build().getBooleanValue();
+   public BooleanValue hudBlur = ValueBuilder.create(this, "Blur").setDefaultBooleanValue(true).build().getBooleanValue();
    public BooleanValue arrayList = ValueBuilder.create(this, "Array List").setDefaultBooleanValue(true).build().getBooleanValue();
    public BooleanValue prettyModuleName = ValueBuilder.create(this, "Pretty Module Name")
       .setOnUpdate(value -> Module.update = true)
@@ -117,6 +120,27 @@ public class HUD extends Module {
    float watermarkHeight;
    List<Vector4f> blurMatrices = new ArrayList<>();
 
+   private void drawWatermarkBackground(EventRender2D e) {
+      float x = 5.0F;
+      float y = 5.0F;
+      float height = this.watermarkHeight + 8.0F;
+      RenderUtils.drawRoundedRect(e.getStack(), x, y, this.width, height, WATERMARK_RADIUS, bodyColor);
+      RenderUtils.drawRoundedRect(e.getStack(), x, y, this.width, Math.min(8.0F, height), WATERMARK_RADIUS, headerColor);
+      RenderUtils.fill(e.getStack(), x, y + WATERMARK_RADIUS, x + this.width, y + 8.0F, headerColor);
+   }
+
+   private void drawHudBackgroundMasks(EventShader e, int color) {
+      if (this.waterMark.getCurrentValue() && this.width > 0.0F && this.watermarkHeight > 0.0F) {
+         RenderUtils.drawRoundedRect(e.getStack(), 5.0F, 5.0F, this.width, this.watermarkHeight + 8.0F, WATERMARK_RADIUS, color);
+      }
+
+      if (this.arrayList.getCurrentValue()) {
+         for (Vector4f blurMatrix : this.blurMatrices) {
+            RenderUtils.drawRoundedRect(e.getStack(), blurMatrix.x(), blurMatrix.y(), blurMatrix.z(), blurMatrix.w(), ARRAY_LIST_RADIUS, color);
+         }
+      }
+   }
+
    public String getModuleDisplayName(Module module) {
       String name = this.prettyModuleName.getCurrentValue() ? module.getPrettyName() : module.getName();
       return name + (module.getSuffix() == null ? "" : " §7" + module.getSuffix());
@@ -135,16 +159,19 @@ public class HUD extends Module {
          Naven.getInstance().getNotificationManager().onRenderShadow(e);
       }
 
-      if (this.waterMark.getCurrentValue()) {
-         RenderUtils.drawRoundedRect(e.getStack(), 5.0F, 5.0F, this.width, this.watermarkHeight + 8.0F, 5.0F, Integer.MIN_VALUE);
+      if (e.getType() == EventType.BLUR) {
+         if (this.hudBlur.getCurrentValue()) {
+            this.drawHudBackgroundMasks(e, Integer.MIN_VALUE);
+         }
+
+         return;
       }
 
-      if (this.arrayList.getCurrentValue()) {
-         for (Vector4f blurMatrix : this.blurMatrices) {
-            RenderUtils.fillBound(e.getStack(), blurMatrix.x(), blurMatrix.y(), blurMatrix.z(), blurMatrix.w(), 1073741824);
-         }
+      if (e.getType() == EventType.SHADOW) {
+         this.drawHudBackgroundMasks(e, 1073741824);
       }
    }
+
 
    @EventTarget
    public void onRender(EventRender2D e) {
@@ -154,13 +181,8 @@ public class HUD extends Module {
          String text = "Naven | " + Version.getVersion() + " | Elysia1337 | " + StringUtils.split(mc.fpsString, " ")[0] + " FPS | " + format.format(new Date());
          this.width = font.getWidth(text, this.watermarkSize.getCurrentValue()) + 14.0F;
          this.watermarkHeight = (float)font.getHeight(true, this.watermarkSize.getCurrentValue());
-         StencilUtils.write(false);
-         RenderUtils.drawRoundedRect(e.getStack(), 5.0F, 5.0F, this.width, this.watermarkHeight + 8.0F, 5.0F, Integer.MIN_VALUE);
-         StencilUtils.erase(true);
-         RenderUtils.fill(e.getStack(), 5.0F, 5.0F, 9.0F + this.width, 8.0F, headerColor);
-         RenderUtils.fill(e.getStack(), 5.0F, 8.0F, 9.0F + this.width, 16.0F + this.watermarkHeight, bodyColor);
+         this.drawWatermarkBackground(e);
          font.render(e.getStack(), text, 12.0, 10.0, Color.WHITE, true, this.watermarkSize.getCurrentValue());
-         StencilUtils.dispose();
          e.getStack().popPose();
       }
 
@@ -206,12 +228,13 @@ public class HUD extends Module {
                float left = -stringWidth * (1.0F - animation.value / 100.0F);
                float right = maxWidth - stringWidth * (animation.value / 100.0F);
                float innerX = this.arrayListDirection.isCurrentMode("Left") ? left : right;
-               RenderUtils.fillBound(
+               RenderUtils.drawRoundedRect(
                   e.getStack(),
                   arrayListX + innerX,
                   arrayListY + height + 2.0F,
                   stringWidth + 3.0F,
                   (float)(animation.value / 100.0F * fontHeight),
+                  ARRAY_LIST_RADIUS,
                   backgroundColor
                );
                this.blurMatrices

@@ -382,6 +382,49 @@ public class RenderUtils {
       fill(stack, left, top, right, bottom, color);
    }
 
+
+   public static void beginScissor(float x, float y, float width, float height) {
+      if (width <= 0.0F || height <= 0.0F) {
+         GL11.glEnable(3089);
+         GL11.glScissor(0, 0, 0, 0);
+         return;
+      }
+
+      int framebufferWidth = mc.getWindow().getWidth();
+      int framebufferHeight = mc.getWindow().getHeight();
+      double scaleX = (double)framebufferWidth / (double)mc.getWindow().getGuiScaledWidth();
+      double scaleY = (double)framebufferHeight / (double)mc.getWindow().getGuiScaledHeight();
+      int scissorX = (int)Math.floor((double)x * scaleX);
+      int scissorY = (int)Math.floor((double)framebufferHeight - (double)(y + height) * scaleY);
+      int scissorWidth = Math.max(0, (int)Math.ceil((double)width * scaleX));
+      int scissorHeight = Math.max(0, (int)Math.ceil((double)height * scaleY));
+
+      if (scissorX < 0) {
+         scissorWidth += scissorX;
+         scissorX = 0;
+      }
+
+      if (scissorY < 0) {
+         scissorHeight += scissorY;
+         scissorY = 0;
+      }
+
+      if (scissorX + scissorWidth > framebufferWidth) {
+         scissorWidth = framebufferWidth - scissorX;
+      }
+
+      if (scissorY + scissorHeight > framebufferHeight) {
+         scissorHeight = framebufferHeight - scissorY;
+      }
+
+      GL11.glEnable(3089);
+      GL11.glScissor(scissorX, scissorY, Math.max(0, scissorWidth), Math.max(0, scissorHeight));
+   }
+
+   public static void endScissor() {
+      GL11.glDisable(3089);
+   }
+
    public static void 装女人(BufferBuilder bufferBuilder, Matrix4f matrix, AABB box) {
       float minX = (float)(box.minX - mc.getEntityRenderDispatcher().camera.getPosition().x());
       float minY = (float)(box.minY - mc.getEntityRenderDispatcher().camera.getPosition().y());
