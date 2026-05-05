@@ -28,3 +28,9 @@ GitHub Actions 已包含 `.github/workflows/android-build.yml`，每次 push 会
 ```
 
 如果仓库还没有 Gradle Wrapper，GitHub Actions 会安装指定 Gradle 版本进行构建。
+
+## 2026-05-05 修复
+
+- 修复聊天页键盘弹出时底部三栏导航被顶起的问题：键盘显示时隐藏底部导航，只保留输入栏贴在键盘上方。
+- 模型执行改为单步模式：提示词要求每次最多返回 1 个原子文件操作；如果模型仍返回多个操作，App 只保留并执行第 1 个，防止一次性执行一大串修改。
+- Ktor HTTP 客户端增加超时配置：请求超时、Socket 超时均为 10 分钟，连接超时为 30 秒，以减少 DeepSeek 等 OpenAI-compatible 接口在长响应时触发 Socket timeout。

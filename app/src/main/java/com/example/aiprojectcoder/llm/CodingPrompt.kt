@@ -14,6 +14,8 @@ object CodingPrompt {
           ]
         }
         Rules:
+        - Use single-step mode: return at most one small, atomic file operation in operations.
+        - Do not batch a long chain of changes; choose the next safest single behavior needed for the user's request.
         - Prefer small, targeted changes.
         - For op=write, content must be the complete replacement file content.
         - Do not include Markdown fences unless the JSON is the only fenced block.

@@ -5,6 +5,7 @@ import com.example.aiprojectcoder.files.ProjectSnapshot
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -27,6 +28,11 @@ class AnthropicClient : LlmClient {
     private val json = Json { ignoreUnknownKeys = true }
     private val client = HttpClient(OkHttp) {
         install(ContentNegotiation) { json(json) }
+        install(HttpTimeout) {
+            requestTimeoutMillis = 10 * 60 * 1000L
+            connectTimeoutMillis = 30 * 1000L
+            socketTimeoutMillis = 10 * 60 * 1000L
+        }
     }
 
     override suspend fun requestPatch(

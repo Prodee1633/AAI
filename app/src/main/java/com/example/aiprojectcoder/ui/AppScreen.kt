@@ -13,10 +13,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -75,6 +77,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -119,6 +122,8 @@ private data class PendingAttachment(
 @Composable
 fun AppScreen() {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
     val repo = remember { AppRepository(context) }
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -316,7 +321,7 @@ fun AppScreen() {
 
     fun applyPatch() {
         val project = activeProject
-        val currentPlan = plan
+        val currentPlan = plan?.toSingleStepPlan()
         if (project == null || currentPlan == null) {
             scope.launch { snackbarHostState.showSnackbar("没有可应用的修改计划") }
             return
@@ -340,7 +345,7 @@ fun AppScreen() {
                         id = UUID.randomUUID().toString(),
                         role = ChatRole.ASSISTANT,
                         content = "已应用当前修改计划：\n${logs.joinToString("\n")}",
-                        thinkingSteps = listOf("已打开项目授权目录", "已执行 ${logs.size} 个文件操作", "已重新扫描项目快照")
+                        thinkingSteps = listOf("已打开项目授权目录", "已启用单步模式", "已执行 ${logs.size} 个文件操作", "已重新扫描项目快照")
                     ),
                     messages,
                     repo,
@@ -429,22 +434,28 @@ fun AppScreen() {
                     steps += "已收到模型响应"
                     val parsed = PatchParser.parse(response.content)
                     steps += "已解析 ${parsed.operations.size} 个文件操作"
+                    val singleStepPlan = parsed.toSingleStepPlan()
+                    if (parsed.operations.size > 1) {
+                        steps += "已启用单步模式：本次只保留第 1 个文件操作，剩余操作不会批量执行"
+                    } else {
+                        steps += "已启用单步模式：本次最多执行 1 个文件操作"
+                    }
                     val applyLogs: List<String>?
                     val updatedSnapshot: ProjectSnapshot?
                     if (autoApplyWithoutConfirmation) {
                         val store = ProjectFileStore(context, Uri.parse(project.uri))
-                        applyLogs = store.apply(parsed)
+                        applyLogs = store.apply(singleStepPlan)
                         updatedSnapshot = store.snapshot()
-                        steps += "已自动应用 ${applyLogs.size} 个文件操作"
+                        steps += "已自动应用 ${applyLogs.size} 个单步文件操作"
                         steps += "已重新扫描项目快照"
                     } else {
                         applyLogs = null
                         updatedSnapshot = null
-                        steps += "已等待用户确认应用"
+                        steps += "已等待用户确认应用单步操作"
                     }
                     PatchRequestResult(
                         response = response,
-                        plan = parsed,
+                        plan = singleStepPlan,
                         applyLogs = applyLogs,
                         updatedSnapshot = updatedSnapshot,
                         thinkingMillis = SystemClock.elapsedRealtime() - startedAt,
@@ -532,14 +543,10 @@ fun AppScreen() {
             )
         },
         bottomBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .imePadding()
-                    .navigationBarsPadding()
-            ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
                 if (selectedTab == AppTab.CHAT && activeProject != null) {
                     ChatComposer(
+                        modifier = Modifier.imePadding(),
                         prompt = prompt,
                         onPromptChange = { prompt = it },
                         attachments = selectedAttachments,
@@ -555,14 +562,16 @@ fun AppScreen() {
                         onApplyPatch = ::applyPatch
                     )
                 }
-                NavigationBar {
-                    AppTab.entries.forEach { tab ->
-                        NavigationBarItem(
-                            selected = selectedTab == tab,
-                            onClick = { selectedTab = tab },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label) }
-                        )
+                if (!imeVisible) {
+                    NavigationBar {
+                        AppTab.entries.forEach { tab ->
+                            NavigationBarItem(
+                                selected = selectedTab == tab,
+                                onClick = { selectedTab = tab },
+                                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                label = { Text(tab.label) }
+                            )
+                        }
                     }
                 }
             }
@@ -784,6 +793,7 @@ private fun ChatPage(
 
 @Composable
 private fun ChatComposer(
+    modifier: Modifier = Modifier,
     prompt: String,
     onPromptChange: (String) -> Unit,
     attachments: List<PendingAttachment>,
@@ -797,7 +807,7 @@ private fun ChatComposer(
     onApplyPatch: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1148,6 +1158,23 @@ private data class PatchRequestResult(
     val thinkingSteps: List<String>,
     val attachments: List<PromptAttachment> = emptyList()
 )
+
+private fun PatchPlan.toSingleStepPlan(): PatchPlan {
+    if (operations.size <= 1) return this
+    val first = operations.first()
+    return copy(
+        summary = buildString {
+            append(summary.ifBlank { "单步修改" })
+            append("\n\n[单步模式] 模型返回了 ")
+            append(operations.size)
+            append(" 个操作，本次只执行第 1 个：")
+            append(first.op.uppercase())
+            append(" ")
+            append(first.path)
+        },
+        operations = listOf(first)
+    )
+}
 
 private fun appendProjectMessage(
     projectId: String,
