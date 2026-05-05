@@ -20,6 +20,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class GeminiClient : LlmClient {
@@ -33,7 +34,7 @@ class GeminiClient : LlmClient {
         apiKey: String,
         snapshot: ProjectSnapshot,
         task: String
-    ): String {
+    ): LlmResponse {
         val prompt = CodingPrompt.system() + "\n\n" + CodingPrompt.user(snapshot, task)
         val body = buildJsonObject {
             put("contents", buildJsonArray {
@@ -58,7 +59,7 @@ class GeminiClient : LlmClient {
         }.body()
 
         val root = json.parseToJsonElement(responseText).jsonObject
-        return root["candidates"]
+        val content = root["candidates"]
             ?.jsonArray
             ?.firstOrNull()
             ?.jsonObject
@@ -72,5 +73,12 @@ class GeminiClient : LlmClient {
             ?.jsonPrimitive
             ?.contentOrNull
             ?: responseText
+        val usage = root["usageMetadata"]?.jsonObject
+        return LlmResponse(
+            content = content,
+            inputTokens = usage?.get("promptTokenCount")?.jsonPrimitive?.longOrNull,
+            outputTokens = usage?.get("candidatesTokenCount")?.jsonPrimitive?.longOrNull,
+            rawResponse = responseText
+        )
     }
 }

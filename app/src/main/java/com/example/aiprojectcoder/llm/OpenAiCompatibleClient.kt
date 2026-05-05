@@ -21,6 +21,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class OpenAiCompatibleClient : LlmClient {
@@ -34,7 +35,7 @@ class OpenAiCompatibleClient : LlmClient {
         apiKey: String,
         snapshot: ProjectSnapshot,
         task: String
-    ): String {
+    ): LlmResponse {
         val body = buildJsonObject {
             put("model", config.model)
             put("temperature", 0.1)
@@ -58,7 +59,7 @@ class OpenAiCompatibleClient : LlmClient {
         }.body()
 
         val root = json.parseToJsonElement(responseText).jsonObject
-        return root["choices"]
+        val content = root["choices"]
             ?.jsonArray
             ?.firstOrNull()
             ?.jsonObject
@@ -68,5 +69,14 @@ class OpenAiCompatibleClient : LlmClient {
             ?.jsonPrimitive
             ?.contentOrNull
             ?: responseText
+        val usage = root["usage"]?.jsonObject
+        return LlmResponse(
+            content = content,
+            inputTokens = usage?.get("prompt_tokens")?.jsonPrimitive?.longOrNull
+                ?: usage?.get("input_tokens")?.jsonPrimitive?.longOrNull,
+            outputTokens = usage?.get("completion_tokens")?.jsonPrimitive?.longOrNull
+                ?: usage?.get("output_tokens")?.jsonPrimitive?.longOrNull,
+            rawResponse = responseText
+        )
     }
 }

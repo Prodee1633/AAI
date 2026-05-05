@@ -5,7 +5,7 @@ import com.example.aiprojectcoder.data.ProviderType
 import com.example.aiprojectcoder.files.ProjectSnapshot
 
 interface LlmClient {
-    suspend fun requestPatch(config: ModelConfig, apiKey: String, snapshot: ProjectSnapshot, task: String): String
+    suspend fun requestPatch(config: ModelConfig, apiKey: String, snapshot: ProjectSnapshot, task: String): LlmResponse
 }
 
 object LlmClientFactory {

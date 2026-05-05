@@ -39,6 +39,6 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: AIProjectCoder-debug-apk
+          name: AAI-debug-apk
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error

@@ -20,6 +20,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 class AnthropicClient : LlmClient {
@@ -33,7 +34,7 @@ class AnthropicClient : LlmClient {
         apiKey: String,
         snapshot: ProjectSnapshot,
         task: String
-    ): String {
+    ): LlmResponse {
         val body = buildJsonObject {
             put("model", config.model.ifBlank { "claude-sonnet-4-5" })
             put("max_tokens", 8192)
@@ -55,7 +56,7 @@ class AnthropicClient : LlmClient {
         }.body()
 
         val root = json.parseToJsonElement(responseText).jsonObject
-        return root["content"]
+        val content = root["content"]
             ?.jsonArray
             ?.firstOrNull()
             ?.jsonObject
@@ -63,5 +64,12 @@ class AnthropicClient : LlmClient {
             ?.jsonPrimitive
             ?.contentOrNull
             ?: responseText
+        val usage = root["usage"]?.jsonObject
+        return LlmResponse(
+            content = content,
+            inputTokens = usage?.get("input_tokens")?.jsonPrimitive?.longOrNull,
+            outputTokens = usage?.get("output_tokens")?.jsonPrimitive?.longOrNull,
+            rawResponse = responseText
+        )
     }
 }
